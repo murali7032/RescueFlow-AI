@@ -47,7 +47,6 @@ Component tests cover shell rendering, form presence, demo warnings. Full E2E br
 
 ## Known untested areas
 
-- Live Firebase token validation end-to-end (requires Firebase project)
 - Live Vertex Gemini responses (fallback is tested)
 - Cloud SQL IAM auth paths
 - Frontend network-error retry UX beyond banners

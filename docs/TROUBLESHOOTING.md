@@ -20,9 +20,9 @@
 
 ## CORS
 
-- Browser blocked: add the **exact** frontend origin to `CORS_ORIGINS` (comma-separated HTTPS Firebase Hosting URLs).
-- Production must not use `*`. Localhost defaults are for development only.
-- After changing Hosting URLs, update Cloud Run:  
+- Browser blocked: add the **exact** frontend origin to `CORS_ORIGINS` (comma-separated HTTPS Cloud Run UI URLs).
+- Prefer exact UI origins over `*` after first boot. Localhost defaults are for development only.
+- After deploying UIs, update the API:  
   `gcloud run services update foodbridge-rescueflow --update-env-vars=CORS_ORIGINS=https://...`
 - Cloud Run `--set-env-vars` treats commas as separators — `deploy/deploy.sh` uses the `^@^` delimiter so `CORS_ORIGINS` can include multiple sites.
 
@@ -44,8 +44,8 @@ Restart Vite after pulling this change so the proxy loads.
 
 ## Auth
 
-- **401 in production:** demo headers are disabled when `ENVIRONMENT=production`. Configure Firebase and send Bearer tokens.
-- **403 role:** check `X-Demo-Role` or Firebase custom claim `role`.
+- **401:** ensure `DEMO_MODE=true` and send `X-Demo-Role: admin|donor|recipient`.
+- **403 role:** check `X-Demo-Role` matches the endpoint’s required role.
 - **Recipient 400:** set `X-Demo-Recipient-Id` or `?recipient_id=`.
 
 ## Cloud Run

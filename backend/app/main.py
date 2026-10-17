@@ -45,12 +45,11 @@ async def lifespan(_app: FastAPI):
         logger.info("AUTO_CREATE_TABLES=false — expecting migrations already applied")
 
     logger.info(
-        "Started env=%s demo_mode=%s db=%s cors_origins=%s firebase=%s",
+        "Started env=%s demo_mode=%s db=%s cors_origins=%s",
         settings.environment,
-        settings.demo_mode and not settings.is_production,
+        settings.demo_mode,
         "sqlite" if settings.is_sqlite else "postgresql",
         settings.cors_origin_list,
-        bool(settings.firebase_project_id),
     )
     yield
 
@@ -64,10 +63,10 @@ app = FastAPI(
     redoc_url="/redoc" if settings.docs_enabled and not settings.is_production else None,
 )
 
+_allow_all = "*" in settings.cors_origin_list
 _cors_kw: dict = {
-    # "allow_origins": settings.cors_origin_list,
-    "allow_origins": ["*"],
-    "allow_credentials": "*" not in settings.cors_origin_list,
+    "allow_origins": ["*"] if _allow_all else settings.cors_origin_list,
+    "allow_credentials": not _allow_all,
     "allow_methods": ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     "allow_headers": [
         "Authorization",
@@ -102,7 +101,6 @@ app.include_router(allocations.router, prefix=API_PREFIX)
 app.include_router(matches.router, prefix=API_PREFIX)
 app.include_router(admin.router, prefix=API_PREFIX)
 app.include_router(ai.router, prefix=API_PREFIX)
-# Demo seed is still registered; the route itself refuses production.
 app.include_router(demo.router, prefix=API_PREFIX)
 
 
@@ -110,7 +108,7 @@ def _health() -> HealthOut:
     return HealthOut(
         status="ok",
         service="rescueflow-api",
-        demo_mode=settings.demo_mode and not settings.is_production,
+        demo_mode=settings.demo_mode,
         database="sqlite" if settings.is_sqlite else "postgresql",
     )
 

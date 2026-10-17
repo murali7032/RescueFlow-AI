@@ -12,7 +12,6 @@ curl -fsS "${BASE_URL}/health" | tee /tmp/fb-health.json
 echo
 curl -fsS "${BASE_URL}/api/v1/health" >/dev/null
 
-# Demo seed is blocked in production (DEMO_MODE=false). Skip if 403.
 SEED_CODE="$(curl -s -o /tmp/fb-seed.json -w '%{http_code}' \
   -X POST "${BASE_URL}/api/v1/demo/seed" \
   -H 'Content-Type: application/json' \
@@ -30,7 +29,9 @@ if [[ "${SEED_CODE}" == "200" ]]; then
   cat /tmp/fb-donation.json
   echo
 else
-  echo "==> Demo seed skipped/blocked (HTTP ${SEED_CODE}) — expected for production"
+  echo "==> Demo seed failed (HTTP ${SEED_CODE}) — check DEMO_MODE=true"
+  cat /tmp/fb-seed.json 2>/dev/null || true
+  echo
 fi
 
 echo "==> Smoke test finished"

@@ -18,8 +18,6 @@ def seed(
     user: AuthUser = Depends(require_roles("admin")),
 ):
     settings = get_settings()
-    if settings.is_production:
-        raise HTTPException(403, "Demo seed is disabled in production")
     if not settings.demo_mode:
         raise HTTPException(403, "DEMO_MODE is disabled")
     return seed_demo(db, force=force)

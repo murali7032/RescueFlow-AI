@@ -14,7 +14,7 @@ export interface ApiClientOptions {
  * the proxy injects an auth redirect that browsers reject on CORS preflight.
  * Use same-origin requests and let Vite proxy /api → localhost:8000.
  *
- * Production: set VITE_API_URL to the Cloud Run URL and VITE_AUTH_MODE=firebase.
+ * Production: set VITE_API_URL to the Cloud Run API URL and VITE_AUTH_MODE=demo.
  */
 function resolveDefaultBase(): string {
   const envUrl =
@@ -61,7 +61,7 @@ export function createApiClient(options: ApiClientOptions = {}) {
 
     const token =
       (await options.getToken?.()) ??
-      (authMode() === "firebase" ? await getIdToken() : null);
+      (await getIdToken());
 
     if (token) {
       headers.Authorization = `Bearer ${token}`;
@@ -72,11 +72,7 @@ export function createApiClient(options: ApiClientOptions = {}) {
         headers["X-Demo-Recipient-Id"] = String(options.recipientId);
       }
     } else {
-      throw new ApiError(
-        401,
-        "Not signed in. Firebase auth is required in production builds.",
-        null
-      );
+      throw new ApiError(401, "Not signed in.", null);
     }
 
     const response = await fetch(`${baseUrl}${path}`, { ...init, headers });

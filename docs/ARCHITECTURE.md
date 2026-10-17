@@ -49,7 +49,7 @@ Recovery = rematch remaining stock after declines/expiries without cancelling va
 
 ## Security boundaries
 
-- Identity from Firebase Bearer token when configured, else demo headers (`X-Demo-Role`) only when `DEMO_MODE=true` and `ENVIRONMENT!=production`.
+- Identity from demo headers (`X-Demo-Role`) when `DEMO_MODE=true` (local and Cloud Run cup deploys).
 - Roles: donor, recipient, admin. Recipients cannot accept another kitchen’s invites.
 - AI tools are read-only; the model cannot allocate or write DB rows.
 

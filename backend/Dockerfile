@@ -6,7 +6,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PORT=8080 \
     ENVIRONMENT=production \
-    DEMO_MODE=false \
+    DEMO_MODE=true \
     AUTO_CREATE_TABLES=false \
     DOCS_ENABLED=false
 

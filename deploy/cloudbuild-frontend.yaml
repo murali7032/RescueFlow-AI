@@ -1,0 +1,21 @@
+# Build a frontend SPA image for Cloud Run.
+# Substitutions: _APP (donor|recipient|admin), _VITE_API_URL, _VITE_AUTH_MODE, _IMAGE
+substitutions:
+  _APP: donor
+  _VITE_API_URL: ""
+  _VITE_AUTH_MODE: demo
+  _IMAGE: foodbridge-ui
+
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - --build-arg=APP=${_APP}
+      - --build-arg=VITE_API_URL=${_VITE_API_URL}
+      - --build-arg=VITE_AUTH_MODE=${_VITE_AUTH_MODE}
+      - -t=${_IMAGE}
+      - -f=Dockerfile
+      - .
+
+images:
+  - ${_IMAGE}

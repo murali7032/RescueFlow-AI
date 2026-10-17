@@ -45,4 +45,4 @@ Point at recovery rate, declines, audit trail.
 > “RescueFlow doesn’t just match—it reallocates safely when the first path fails, without overselling a single portion.”
 
 ### 3:45 — Close
-> “Synthetic demo today. Same ledger rules for production with Cloud SQL locks and Firebase auth.”
+> “Synthetic demo today. Same ledger rules for production with Cloud SQL locks on Cloud Run.”

@@ -15,7 +15,7 @@ AI-assisted surplus food recovery and allocation for the AI Builder Cup 2026.
 
 ## Architecture
 
-One FastAPI backend, three Vite + React + TypeScript frontends, shared UI/API client. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+One FastAPI backend, three Vite + React + TypeScript frontends, shared UI/API client. All four services deploy to **Cloud Run**. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Repository structure
 
@@ -23,7 +23,7 @@ One FastAPI backend, three Vite + React + TypeScript frontends, shared UI/API cl
 frontend/{donor,recipient,admin,shared}
 backend/app/{api,services,agent,db,workers}
 backend/tests
-deploy/{deploy.sh,smoke_test.sh}
+deploy/{deploy.sh,deploy_frontend.sh,smoke_test.sh}
 docs/*
 ```
 
@@ -31,7 +31,7 @@ docs/*
 
 - Python 3.11+
 - Node 20+
-- Optional: Docker, gcloud, PostgreSQL, Firebase
+- Optional: Docker, gcloud, PostgreSQL
 
 ## Local backend
 
@@ -47,7 +47,7 @@ uvicorn app.main:app --reload --port 8000
 
 Health: http://localhost:8000/health · Docs: http://localhost:8000/docs
 
-With `DEMO_MODE=true` (default in development), send `X-Demo-Role: admin|donor|recipient`.
+With `DEMO_MODE=true` (default), send `X-Demo-Role: admin|donor|recipient`.
 
 ## Frontend
 
@@ -79,7 +79,7 @@ Details: [docs/TESTING.md](docs/TESTING.md)
 ## Deployment
 
 - [docs/GCP_DEPLOYMENT.md](docs/GCP_DEPLOYMENT.md)
-- `./deploy/deploy.sh` · `./deploy/smoke_test.sh`
+- `./deploy/deploy.sh` · `./deploy/deploy_frontend.sh` · `./deploy/smoke_test.sh`
 
 ## Documentation
 
@@ -97,18 +97,21 @@ See `backend/.env.example` and `deploy/env.production.example`.
 - `DEMO_MODE=true`, SQLite, localhost `CORS_ORIGINS`
 - Frontends may omit `VITE_API_URL` (defaults to localhost or Cloud Shell proxy)
 
-### Production (Cloud Run + Cloud SQL + Firebase)
+### Production (Cloud Run + Cloud SQL)
 Startup **fails closed** unless:
 - `ENVIRONMENT=production`
-- `DEMO_MODE=false`
+- `DEMO_MODE=true`
 - `DATABASE_URL` → Postgres via Secret Manager (`foodbridge-database-url`)
-- `CORS_ORIGINS` → exact Firebase Hosting HTTPS origins (**no `*`**, no localhost-only)
-- `FIREBASE_PROJECT_ID` + `GOOGLE_CLOUD_PROJECT`
+- `CORS_ORIGINS` → Cloud Run UI HTTPS origins (or `*` for first boot)
+- `GOOGLE_CLOUD_PROJECT`
 
 ```bash
-export CORS_ORIGINS="https://foodbridge-donor.web.app,https://foodbridge-recipient.web.app,https://foodbridge-admin.web.app"
+export CORS_ORIGINS="*"
 AUTO_CREATE_TABLES=true ./deploy/deploy.sh --cloudsql "$PROJECT:asia-south1:foodbridge-pg"
-./deploy/deploy_frontend.sh   # needs VITE_API_URL + VITE_FIREBASE_*
+
+export VITE_API_URL="$(gcloud run services describe foodbridge-rescueflow --region=asia-south1 --format='value(status.url)')"
+./deploy/deploy_frontend.sh
+# Then lock CORS_ORIGINS to the three UI URLs printed by the script
 ```
 
 Full guide: [docs/GCP_DEPLOYMENT.md](docs/GCP_DEPLOYMENT.md). Never commit secrets.

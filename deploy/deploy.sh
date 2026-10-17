@@ -2,8 +2,8 @@
 # Deploy RescueFlow AI backend to Cloud Run with Cloud SQL + Secret Manager.
 #
 # Usage:
-#   export CORS_ORIGINS="https://donor.web.app,https://recipient.web.app,https://admin.web.app"
-#   export FIREBASE_PROJECT_ID="your-project"
+#   export CORS_ORIGINS="https://foodbridge-donor-ui-XXXX.a.run.app,https://foodbridge-recipient-ui-XXXX.a.run.app,https://foodbridge-admin-ui-XXXX.a.run.app"
+#   # Or temporarily: export CORS_ORIGINS="*"
 #   export CLOUDSQL_INSTANCE="PROJECT:asia-south1:foodbridge-pg"   # optional
 #   ./deploy/deploy.sh [--project ID] [--region REGION] [--service NAME]
 #
@@ -16,6 +16,7 @@ SERVICE="${SERVICE:-foodbridge-rescueflow}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 AUTO_CREATE_TABLES="${AUTO_CREATE_TABLES:-false}"
+DEMO_MODE="${DEMO_MODE:-true}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -23,8 +24,8 @@ while [[ $# -gt 0 ]]; do
     --region) REGION="$2"; shift 2 ;;
     --service) SERVICE="$2"; shift 2 ;;
     --cors-origins) CORS_ORIGINS="$2"; shift 2 ;;
-    --firebase-project) FIREBASE_PROJECT_ID="$2"; shift 2 ;;
     --cloudsql) CLOUDSQL_INSTANCE="$2"; shift 2 ;;
+    --demo-mode) DEMO_MODE="$2"; shift 2 ;;
     *) echo "Unknown arg: $1"; exit 1 ;;
   esac
 done
@@ -37,27 +38,31 @@ if [[ -z "${PROJECT_ID}" || "${PROJECT_ID}" == "(unset)" ]]; then
   exit 1
 fi
 
-FIREBASE_PROJECT_ID="${FIREBASE_PROJECT_ID:-${PROJECT_ID}}"
 CORS_ORIGINS="${CORS_ORIGINS:-}"
 
 if [[ -z "${CORS_ORIGINS}" ]]; then
   echo "ERROR: CORS_ORIGINS is required for production deploy."
-  echo "Example:"
-  echo "  export CORS_ORIGINS='https://foodbridge-donor.web.app,https://foodbridge-recipient.web.app,https://foodbridge-admin.web.app'"
+  echo "Example (after frontends are deployed):"
+  echo "  export CORS_ORIGINS='https://foodbridge-donor-ui-XXXX.a.run.app,https://foodbridge-recipient-ui-XXXX.a.run.app,https://foodbridge-admin-ui-XXXX.a.run.app'"
+  echo "Or for first boot before UI URLs exist:"
+  echo "  export CORS_ORIGINS='*'"
   echo "  ./deploy/deploy.sh"
   exit 1
 fi
 
-# Allow wildcard '*' to permit all origins (use with caution)
 if [[ "${CORS_ORIGINS}" == "*" ]]; then
   echo "WARNING: CORS_ORIGINS set to '*', all origins will be allowed."
+fi
+
+if [[ "${DEMO_MODE}" == "true" ]]; then
+  echo "WARNING: DEMO_MODE=true — X-Demo-Role headers are accepted (cup / demo deploy)."
 fi
 
 echo "==> Project:           ${PROJECT_ID}"
 echo "==> Region:            ${REGION}"
 echo "==> Service:           ${SERVICE}"
-echo "==> Firebase project:  ${FIREBASE_PROJECT_ID}"
 echo "==> CORS_ORIGINS:      ${CORS_ORIGINS}"
+echo "==> DEMO_MODE:         ${DEMO_MODE}"
 echo "==> AUTO_CREATE_TABLES:${AUTO_CREATE_TABLES}"
 
 echo "==> Enabling required APIs (idempotent)..."
@@ -68,7 +73,6 @@ gcloud services enable \
   secretmanager.googleapis.com \
   sqladmin.googleapis.com \
   aiplatform.googleapis.com \
-  identitytoolkit.googleapis.com \
   --project="${PROJECT_ID}"
 
 echo "==> Existing Cloud Run services in ${REGION}:"
@@ -95,14 +99,13 @@ gcloud secrets add-iam-policy-binding foodbridge-database-url \
 
 # Use @ delimiter so CORS_ORIGINS may contain commas.
 ENV_VARS="^@^ENVIRONMENT=production"
-ENV_VARS+="@DEMO_MODE=false"
+ENV_VARS+="@DEMO_MODE=${DEMO_MODE}"
 ENV_VARS+="@AUTO_CREATE_TABLES=${AUTO_CREATE_TABLES}"
 ENV_VARS+="@DOCS_ENABLED=false"
 ENV_VARS+="@GOOGLE_CLOUD_PROJECT=${PROJECT_ID}"
 ENV_VARS+="@GOOGLE_CLOUD_LOCATION=${REGION}"
 ENV_VARS+="@GOOGLE_GENAI_USE_VERTEXAI=true"
 ENV_VARS+="@AI_ENABLED=true"
-ENV_VARS+="@FIREBASE_PROJECT_ID=${FIREBASE_PROJECT_ID}"
 ENV_VARS+="@CORS_ORIGINS=${CORS_ORIGINS}"
 
 DEPLOY_ARGS=(
@@ -125,7 +128,6 @@ DEPLOY_ARGS=(
 if [[ -n "${CLOUDSQL_INSTANCE:-}" ]]; then
   echo "==> Attaching Cloud SQL: ${CLOUDSQL_INSTANCE}"
   DEPLOY_ARGS+=(--add-cloudsql-instances "${CLOUDSQL_INSTANCE}")
-  # Cloud SQL Client role
   gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
     --member="serviceAccount:${RUNTIME_SA}" \
     --role="roles/cloudsql.client" \
@@ -139,7 +141,6 @@ fi
 echo "==> Building and deploying backend..."
 gcloud "${DEPLOY_ARGS[@]}"
 
-# Vertex AI user (best-effort)
 gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
   --member="serviceAccount:${RUNTIME_SA}" \
   --role="roles/aiplatform.user" \
@@ -151,7 +152,8 @@ echo "==> Deployed: ${URL}"
 echo "==> Health:   ${URL}/health"
 echo ""
 echo "Next:"
-echo "  1. Build frontends with VITE_API_URL=${URL} and VITE_AUTH_MODE=firebase"
-echo "  2. Deploy frontends (static sites on Cloud Run)"
-echo "  3. ./deploy/smoke_test.sh ${URL}"
-echo "  4. After schema exists, keep AUTO_CREATE_TABLES=false"
+echo "  1. export VITE_API_URL=${URL}"
+echo "  2. ./deploy/deploy_frontend.sh   # deploys donor/recipient/admin to Cloud Run"
+echo "  3. Update CORS_ORIGINS to the three UI Cloud Run URLs, then redeploy backend"
+echo "  4. ./deploy/smoke_test.sh ${URL}"
+echo "  5. After schema exists, keep AUTO_CREATE_TABLES=false"

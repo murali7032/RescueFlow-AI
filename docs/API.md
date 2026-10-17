@@ -1,6 +1,6 @@
 # API Reference — `/api/v1`
 
-Auth: `Authorization: Bearer <Firebase ID token>` **or** (demo only) headers `X-Demo-Role`, `X-Demo-User-Id`, optional `X-Demo-Recipient-Id`.
+Auth: demo headers `X-Demo-Role`, `X-Demo-User-Id`, optional `X-Demo-Recipient-Id` when `DEMO_MODE=true`.
 
 Errors: FastAPI detail string/object with HTTP 4xx/5xx.
 
@@ -15,7 +15,7 @@ Errors: FastAPI detail string/object with HTTP 4xx/5xx.
 
 | Method | Path | Role | Notes |
 |--------|------|------|-------|
-| POST | `/api/v1/demo/seed?force=false` | admin | Blocked when `ENVIRONMENT=production` or `DEMO_MODE=false` |
+| POST | `/api/v1/demo/seed?force=false` | admin | Blocked when `DEMO_MODE=false` |
 
 ## Donations
 
