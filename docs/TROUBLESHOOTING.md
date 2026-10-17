@@ -22,6 +22,22 @@
 
 - Browser blocked: add the exact frontend origin to `CORS_ORIGINS` (comma-separated). Production must not use `*` with credentials.
 
+### Cloud Shell Web Preview (`forwardAuthCookie` / preflight redirect)
+
+Calling `https://8000-….cloudshell.dev` from `https://5173-….cloudshell.dev` fails: Cloud Shell redirects the OPTIONS preflight for auth cookies, and browsers forbid redirects on preflight.
+
+**Fix:** do **not** set `VITE_API_URL` to the port-8000 preview URL. Leave it unset/empty so the UI calls same-origin `/api/...`. Vite proxies to `http://127.0.0.1:8000`.
+
+```bash
+# Terminal 1 — API on 8000 (keep Web Preview on the frontend port only)
+cd backend && uvicorn app.main:app --host 0.0.0.0 --port 8000
+
+# Terminal 2 — open Web Preview on 5173 / 5174 / 5175
+cd frontend/donor && npm run dev -- --host 0.0.0.0 --port 5173
+```
+
+Restart Vite after pulling this change so the proxy loads.
+
 ## Auth
 
 - **401 in production:** demo headers are disabled when `ENVIRONMENT=production`. Configure Firebase and send Bearer tokens.

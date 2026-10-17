@@ -32,13 +32,18 @@ app = FastAPI(
     description="AI-assisted surplus food recovery and allocation platform",
 )
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.cors_origin_list,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# In development, also allow Google Cloud Shell Web Preview origins.
+# Prefer same-origin Vite proxy in Cloud Shell (avoids auth-cookie redirects).
+_cors_kw: dict = {
+    "allow_origins": settings.cors_origin_list,
+    "allow_credentials": True,
+    "allow_methods": ["*"],
+    "allow_headers": ["*"],
+}
+if not settings.is_production:
+    _cors_kw["allow_origin_regex"] = r"https://.*\.cloudshell\.dev$"
+
+app.add_middleware(CORSMiddleware, **_cors_kw)
 
 if settings.auto_create_tables:
     # Local/dev convenience. Prefer Alembic migrations in production.

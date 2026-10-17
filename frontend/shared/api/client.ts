@@ -7,10 +7,34 @@ export interface ApiClientOptions {
   getToken?: () => string | null;
 }
 
-const DEFAULT_BASE =
-  (typeof import.meta !== "undefined" &&
-    (import.meta as { env?: { VITE_API_URL?: string } }).env?.VITE_API_URL) ||
-  "http://localhost:8000";
+/**
+ * Cloud Shell Web Preview cannot call another preview port (e.g. 8000 from 5173):
+ * the proxy injects an auth redirect that browsers reject on CORS preflight.
+ * Use same-origin requests and let Vite proxy /api → localhost:8000.
+ */
+function resolveDefaultBase(): string {
+  const envUrl =
+    typeof import.meta !== "undefined"
+      ? (import.meta as { env?: { VITE_API_URL?: string } }).env?.VITE_API_URL
+      : undefined;
+
+  if (envUrl === "" || envUrl === "/") {
+    return "";
+  }
+
+  if (
+    typeof window !== "undefined" &&
+    /\.cloudshell\.dev$/i.test(window.location.hostname)
+  ) {
+    return "";
+  }
+
+  if (envUrl && envUrl.trim()) {
+    return envUrl.replace(/\/$/, "");
+  }
+
+  return "http://localhost:8000";
+}
 
 export class ApiError extends Error {
   status: number;
@@ -23,7 +47,7 @@ export class ApiError extends Error {
 }
 
 export function createApiClient(options: ApiClientOptions = {}) {
-  const baseUrl = options.baseUrl ?? DEFAULT_BASE;
+  const baseUrl = options.baseUrl ?? resolveDefaultBase();
 
   async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     const headers: Record<string, string> = {
