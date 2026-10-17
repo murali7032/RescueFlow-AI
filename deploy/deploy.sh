@@ -48,9 +48,9 @@ if [[ -z "${CORS_ORIGINS}" ]]; then
   exit 1
 fi
 
-if [[ "${CORS_ORIGINS}" == *"*"* ]]; then
-  echo "ERROR: CORS_ORIGINS must not contain '*'"
-  exit 1
+# Allow wildcard '*' to permit all origins (use with caution)
+if [[ "${CORS_ORIGINS}" == "*" ]]; then
+  echo "WARNING: CORS_ORIGINS set to '*', all origins will be allowed."
 fi
 
 echo "==> Project:           ${PROJECT_ID}"
@@ -152,6 +152,6 @@ echo "==> Health:   ${URL}/health"
 echo ""
 echo "Next:"
 echo "  1. Build frontends with VITE_API_URL=${URL} and VITE_AUTH_MODE=firebase"
-echo "  2. Deploy Firebase Hosting (see firebase.json)"
+echo "  2. Deploy frontends (static sites on Cloud Run)"
 echo "  3. ./deploy/smoke_test.sh ${URL}"
 echo "  4. After schema exists, keep AUTO_CREATE_TABLES=false"

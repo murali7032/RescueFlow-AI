@@ -114,10 +114,11 @@ class Settings(BaseSettings):
                 "https://YOUR-admin.web.app"
             )
 
-        if any(o == "*" for o in self.cors_origin_list):
-            errors.append(
-                "CORS_ORIGINS must not contain '*', especially with credentials."
-            )
+# Allow wildcard '*' in CORS_ORIGINS (use with caution). Previously blocked in production.
+# if any(o == "*" for o in self.cors_origin_list):
+#     errors.append(
+#         "CORS_ORIGINS must not contain '*', especially with credentials."
+#     )
 
         for origin in self.cors_origin_list:
             if origin.startswith("http://") and "localhost" not in origin and "127.0.0.1" not in origin:

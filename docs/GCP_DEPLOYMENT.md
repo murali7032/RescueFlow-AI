@@ -1,6 +1,6 @@
 # Google Cloud Deployment Guide
 
-Target stack: **Cloud Run** (API) · **Cloud SQL PostgreSQL** · **Secret Manager** · **Firebase Hosting + Auth** · **Vertex AI** (optional).
+Target stack: **Cloud Run** (API) · **Cloud SQL PostgreSQL** · **Secret Manager** · **Firebase Auth** · **Vertex AI** (optional).
 
 Default region: **asia-south1**. Use your existing project ID from `gcloud config get-value project`.
 
@@ -14,7 +14,7 @@ When `ENVIRONMENT=production` the API **refuses to start** unless:
 |----------|-------------|
 | `DEMO_MODE` | `false` |
 | `DATABASE_URL` | PostgreSQL (not SQLite) |
-| `CORS_ORIGINS` | Exact `https://` Firebase Hosting origins, **no `*`** |
+| `CORS_ORIGINS` | Exact `https://` Cloud Run UI URLs **or `*` for all origins (caution)** |
 | `FIREBASE_PROJECT_ID` | Set |
 | `GOOGLE_CLOUD_PROJECT` | Set |
 
@@ -72,13 +72,12 @@ printf 'postgresql+psycopg2://foodbridge:PASSWORD@/foodbridge?host=/cloudsql/%s'
 
 ---
 
-## 3. Firebase (Auth + Hosting)
+## 3. Firebase Auth (no Hosting)
 
 1. Firebase console → add/use project (can match GCP project).
 2. Enable **Authentication** (Email/Password and/or Google).
-3. Create three Hosting sites: `foodbridge-donor`, `foodbridge-recipient`, `foodbridge-admin` (names must match `firebase.json`).
-4. Register three web apps; copy config into frontend `.env.production` (`VITE_FIREBASE_*`).
-5. Set **custom claims** on users (Admin SDK / Cloud Function), e.g. `{ "role": "donor" }` or `{ "role": "recipient", "recipient_id": 1 }`.
+3. Register three web apps (donor, recipient, admin) and copy the config into your frontend `.env.production` (`VITE_FIREBASE_*`).
+4. (Optional) Set **custom claims** on users via the Admin SDK or a Cloud Function, e.g. `{ "role": "donor" }` or `{ "role": "recipient", "recipient_id": 1 }`.
 
 ```bash
 cp .firebaserc.example .firebaserc
@@ -124,17 +123,32 @@ gcloud run services update foodbridge-rescueflow \
 
 ---
 
-## 5. Deploy frontends
+## 5. Deploy frontends (static site on Cloud Run)
 
 ```bash
-export VITE_API_URL="$(gcloud run services describe foodbridge-rescueflow --region=asia-south1 --format='value(status.url)')"
-export VITE_AUTH_MODE=firebase
-export VITE_FIREBASE_API_KEY=...
-export VITE_FIREBASE_AUTH_DOMAIN=YOUR_PROJECT.firebaseapp.com
-export VITE_FIREBASE_PROJECT_ID=YOUR_PROJECT
-export VITE_FIREBASE_APP_ID=...
+# 1️⃣ Build each frontend (example using Vite)
+cd frontend/donor   # repeat for recipient & admin or use a monorepo script
+npm install
+npm run build   # outputs to ./dist
 
-./deploy/deploy_frontend.sh
+# 2️⃣ Create a lightweight Docker image (nginx) for the built assets
+cat > Dockerfile <<'EOF'
+FROM nginx:stable-alpine
+COPY dist/ /usr/share/nginx/html
+EXPOSE 8080
+EOF
+
+# 3️⃣ Build and push the image
+PROJECT=$(gcloud config get-value project)
+docker build -t gcr.io/$PROJECT/foodbridge-donor-ui:latest .
+docker push gcr.io/$PROJECT/foodbridge-donor-ui:latest
+
+# 4️⃣ Deploy to Cloud Run (repeat for each UI image)
+gcloud run deploy foodbridge-donor-ui \
+  --image gcr.io/$PROJECT/foodbridge-donor-ui:latest \
+  --region asia-south1 \
+  --allow-unauthenticated \
+  --port 8080
 ```
 
 Or build each app manually from `frontend/*/ .env.production.example`.

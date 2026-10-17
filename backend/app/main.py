@@ -66,7 +66,7 @@ app = FastAPI(
 
 _cors_kw: dict = {
     "allow_origins": settings.cors_origin_list,
-    "allow_credentials": True,
+    "allow_credentials": "*" not in settings.cors_origin_list,
     "allow_methods": ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     "allow_headers": [
         "Authorization",
