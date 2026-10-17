@@ -26,8 +26,19 @@ done
 
 : "${VITE_API_URL:?Set VITE_API_URL to your Cloud Run API URL}"
 
+echo "=============================================="
+echo " RescueFlow frontend → Cloud Run (NOT Firebase)"
+echo "=============================================="
+
+# Hard fail if an old Firebase Hosting layout is still present
+if [[ -f "${ROOT_DIR}/firebase.json" || -f "${ROOT_DIR}/.firebaserc" ]]; then
+  echo "ERROR: firebase.json / .firebaserc still present."
+  echo "This script no longer uses Firebase Hosting."
+  echo "Run: git pull origin main   (or delete those files) and re-run."
+  exit 1
+fi
+
 command -v gcloud >/dev/null || { echo "gcloud CLI required"; exit 1; }
-command -v npm >/dev/null || { echo "npm required"; exit 1; }
 
 PROJECT_ID="${PROJECT_ID:-$(gcloud config get-value project 2>/dev/null)}"
 if [[ -z "${PROJECT_ID}" || "${PROJECT_ID}" == "(unset)" ]]; then
