@@ -20,7 +20,11 @@
 
 ## CORS
 
-- Browser blocked: add the exact frontend origin to `CORS_ORIGINS` (comma-separated). Production must not use `*` with credentials.
+- Browser blocked: add the **exact** frontend origin to `CORS_ORIGINS` (comma-separated HTTPS Firebase Hosting URLs).
+- Production must not use `*`. Localhost defaults are for development only.
+- After changing Hosting URLs, update Cloud Run:  
+  `gcloud run services update foodbridge-rescueflow --update-env-vars=CORS_ORIGINS=https://...`
+- Cloud Run `--set-env-vars` treats commas as separators — `deploy/deploy.sh` uses the `^@^` delimiter so `CORS_ORIGINS` can include multiple sites.
 
 ### Cloud Shell Web Preview (`forwardAuthCookie` / preflight redirect)
 

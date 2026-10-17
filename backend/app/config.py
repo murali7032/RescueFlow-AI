@@ -1,11 +1,21 @@
-"""Environment settings for FoodBridge / RescueFlow AI."""
+"""Environment settings for FoodBridge / RescueFlow AI.
+
+Local defaults favour SQLite + demo auth + localhost CORS.
+Production (ENVIRONMENT=production) requires Postgres, Firebase, and
+explicit CORS_ORIGINS (Firebase Hosting / custom domains) — never "*".
+"""
 
 from __future__ import annotations
 
-import os
 from functools import lru_cache
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_LOCAL_CORS = (
+    "http://localhost:5173,http://localhost:5174,http://localhost:5175,"
+    "http://127.0.0.1:5173,http://127.0.0.1:5174,http://127.0.0.1:5175"
+)
 
 
 class Settings(BaseSettings):
@@ -13,6 +23,7 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore",
+        case_sensitive=False,
     )
 
     app_name: str = "RescueFlow AI by FoodBridge"
@@ -22,11 +33,14 @@ class Settings(BaseSettings):
     demo_mode: bool = True
     log_level: str = "INFO"
 
-    # CORS — comma-separated origins. Never use * with credentials in production.
-    cors_origins: str = "http://localhost:5173,http://localhost:5174,http://localhost:5175,http://127.0.0.1:5173,http://127.0.0.1:5174,http://127.0.0.1:5175"
+    # Comma-separated browser origins. Required & non-wildcard in production.
+    cors_origins: str = _LOCAL_CORS
+    # Optional regex for extra origins (dev Cloud Shell only — ignored in prod).
+    cors_origin_regex: str | None = None
 
-    # Firebase (optional). When unset, demo auth may be used if demo_mode=True.
+    # Firebase Auth (required in production)
     firebase_project_id: str | None = None
+    # Prefer ADC on Cloud Run. JSON only for local/CI if needed (Secret Manager).
     firebase_credentials_json: str | None = None
 
     # Vertex AI / Gemini
@@ -37,11 +51,30 @@ class Settings(BaseSettings):
     ai_timeout_seconds: float = 12.0
     ai_enabled: bool = True
 
-    # Matching weights (must sum to 1.0)
+    # Matching weights
     weight_deadline: float = 0.35
     weight_capacity: float = 0.30
     weight_distance: float = 0.20
     weight_preference: float = 0.15
+
+    # HTTP — OpenAPI docs disabled automatically in production
+    docs_enabled: bool = True
+
+    @field_validator(
+        "demo_mode",
+        "auto_create_tables",
+        "ai_enabled",
+        "google_genai_use_vertexai",
+        "docs_enabled",
+        mode="before",
+    )
+    @classmethod
+    def _parse_bool(cls, value):  # noqa: ANN001
+        if isinstance(value, bool):
+            return value
+        if value is None:
+            return False
+        return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
     @property
     def cors_origin_list(self) -> list[str]:
@@ -55,29 +88,60 @@ class Settings(BaseSettings):
     def is_production(self) -> bool:
         return self.environment.lower() == "production"
 
+    def validate_for_runtime(self) -> list[str]:
+        """Return human-readable errors. Empty list means OK to start."""
+        errors: list[str] = []
+
+        if not self.is_production:
+            return errors
+
+        if self.demo_mode:
+            errors.append(
+                "DEMO_MODE must be false when ENVIRONMENT=production "
+                "(demo role headers are a security risk)."
+            )
+
+        if self.is_sqlite:
+            errors.append(
+                "DATABASE_URL must be PostgreSQL (Cloud SQL) in production, "
+                "not SQLite."
+            )
+
+        if not self.cors_origin_list:
+            errors.append(
+                "CORS_ORIGINS is required in production. Set Firebase Hosting "
+                "URLs, e.g. https://YOUR-donor.web.app,https://YOUR-recipient.web.app,"
+                "https://YOUR-admin.web.app"
+            )
+
+        if any(o == "*" for o in self.cors_origin_list):
+            errors.append(
+                "CORS_ORIGINS must not contain '*', especially with credentials."
+            )
+
+        for origin in self.cors_origin_list:
+            if origin.startswith("http://") and "localhost" not in origin and "127.0.0.1" not in origin:
+                errors.append(
+                    f"Insecure CORS origin in production (use https): {origin}"
+                )
+
+        if not self.firebase_project_id:
+            errors.append(
+                "FIREBASE_PROJECT_ID is required in production for token validation."
+            )
+
+        if not self.google_cloud_project:
+            errors.append(
+                "GOOGLE_CLOUD_PROJECT should be set on Cloud Run "
+                "(needed for Vertex AI / ADC)."
+            )
+
+        return errors
+
 
 @lru_cache
 def get_settings() -> Settings:
-    return Settings(
-        database_url=os.getenv("DATABASE_URL", "sqlite:///./foodbridge.db"),
-        auto_create_tables=os.getenv("AUTO_CREATE_TABLES", "true").lower() == "true",
-        demo_mode=os.getenv("DEMO_MODE", "true").lower() == "true",
-        environment=os.getenv("ENVIRONMENT", "development"),
-        cors_origins=os.getenv(
-            "CORS_ORIGINS",
-            "http://localhost:5173,http://localhost:5174,http://localhost:5175,http://127.0.0.1:5173,http://127.0.0.1:5174,http://127.0.0.1:5175",
-        ),
-        firebase_project_id=os.getenv("FIREBASE_PROJECT_ID"),
-        google_cloud_project=os.getenv("GOOGLE_CLOUD_PROJECT"),
-        google_cloud_location=os.getenv("GOOGLE_CLOUD_LOCATION", "asia-south1"),
-        google_genai_use_vertexai=os.getenv(
-            "GOOGLE_GENAI_USE_VERTEXAI", "true"
-        ).lower()
-        == "true",
-        gemini_model=os.getenv("GEMINI_MODEL", "gemini-2.0-flash"),
-        ai_enabled=os.getenv("AI_ENABLED", "true").lower() == "true",
-        log_level=os.getenv("LOG_LEVEL", "INFO"),
-    )
+    return Settings()
 
 
 # Backward-compatible module-level aliases used by session.py

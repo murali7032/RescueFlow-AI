@@ -6,14 +6,28 @@ from app.config import get_settings
 settings = get_settings()
 DATABASE_URL = settings.database_url
 
-connect_args = (
-    {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
-)
+connect_args: dict = {}
+engine_kwargs: dict = {
+    "pool_pre_ping": True,
+}
+
+if DATABASE_URL.startswith("sqlite"):
+    connect_args["check_same_thread"] = False
+else:
+    # Cloud SQL / Postgres: modest pool suitable for Cloud Run concurrency.
+    engine_kwargs.update(
+        {
+            "pool_size": 5,
+            "max_overflow": 10,
+            "pool_recycle": 1800,
+            "pool_timeout": 30,
+        }
+    )
 
 engine = create_engine(
     DATABASE_URL,
     connect_args=connect_args,
-    pool_pre_ping=True,
+    **engine_kwargs,
 )
 
 if DATABASE_URL.startswith("sqlite"):

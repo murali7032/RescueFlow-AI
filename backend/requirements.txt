@@ -6,7 +6,6 @@ pydantic-settings==2.7.0
 python-dotenv==1.0.1
 pytest==8.3.4
 httpx==0.28.1
-# Optional — install when using Firebase / Vertex AI
-# firebase-admin==6.6.0
-# google-genai==1.5.0
-# psycopg2-binary==2.9.10
+psycopg2-binary==2.9.10
+firebase-admin==6.6.0
+google-genai==1.5.0

@@ -1,8 +1,7 @@
 """Authentication and role-based authorization.
 
-Production: Firebase ID token validation when FIREBASE_PROJECT_ID is set.
-Development/demo: X-Demo-Role / X-Demo-User-Id headers when DEMO_MODE=true.
-Demo headers are rejected when environment=production.
+Production: Firebase ID token validation (FIREBASE_PROJECT_ID required).
+Development: optional X-Demo-* headers when DEMO_MODE=true and not production.
 """
 
 from __future__ import annotations
@@ -41,24 +40,36 @@ def _verify_firebase_token(token: str) -> dict:
         ) from exc
 
     if not firebase_admin._apps:
+        options = {"projectId": settings.firebase_project_id} if settings.firebase_project_id else None
         if settings.firebase_credentials_json:
             import json
 
             cred = credentials.Certificate(
                 json.loads(settings.firebase_credentials_json)
             )
-            firebase_admin.initialize_app(cred)
+            firebase_admin.initialize_app(cred, options)
         else:
-            # Application Default Credentials (Cloud Run / gcloud)
-            firebase_admin.initialize_app()
+            # Cloud Run: Application Default Credentials
+            firebase_admin.initialize_app(options=options)
 
     try:
-        return fb_auth.verify_id_token(token)
+        decoded = fb_auth.verify_id_token(token)
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Invalid Firebase token: {exc}",
+            detail="Invalid or expired Firebase token",
         ) from exc
+
+    if (
+        settings.firebase_project_id
+        and decoded.get("aud")
+        and decoded.get("aud") != settings.firebase_project_id
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token audience does not match FIREBASE_PROJECT_ID",
+        )
+    return decoded
 
 
 def get_current_user(
@@ -68,46 +79,70 @@ def get_current_user(
     x_demo_recipient_id: Annotated[int | None, Header()] = None,
     db: Session = Depends(get_db),
 ) -> AuthUser:
+    del db  # reserved for user lookup enrichment
     settings = get_settings()
 
     if authorization and authorization.lower().startswith("bearer "):
         token = authorization.split(" ", 1)[1].strip()
-        if settings.firebase_project_id:
-            claims = _verify_firebase_token(token)
-            role = claims.get("role") or claims.get("foodbridge_role") or "donor"
-            return AuthUser(
-                uid=claims.get("uid") or claims.get("sub") or "unknown",
-                email=claims.get("email") or "",
-                role=role,
-                display_name=claims.get("name") or claims.get("email") or "User",
-                recipient_id=claims.get("recipient_id"),
-                organization_id=claims.get("organization_id"),
-                auth_method="firebase",
+        if not settings.firebase_project_id:
+            raise HTTPException(
+                401,
+                "Bearer tokens require FIREBASE_PROJECT_ID to be configured",
             )
-        # Token present but Firebase not configured
-        raise HTTPException(
-            401,
-            "Bearer tokens require FIREBASE_PROJECT_ID to be configured",
+        claims = _verify_firebase_token(token)
+        role = (
+            claims.get("role")
+            or claims.get("foodbridge_role")
+            or (claims.get("claims") or {}).get("role")
+            or "donor"
+        )
+        if role not in {"donor", "recipient", "admin"}:
+            raise HTTPException(403, f"Unsupported role claim: {role}")
+        return AuthUser(
+            uid=str(claims.get("uid") or claims.get("sub") or "unknown"),
+            email=str(claims.get("email") or ""),
+            role=str(role),
+            display_name=str(
+                claims.get("name") or claims.get("email") or "User"
+            ),
+            recipient_id=_as_optional_int(
+                claims.get("recipient_id")
+                or (claims.get("claims") or {}).get("recipient_id")
+            ),
+            organization_id=_as_optional_int(
+                claims.get("organization_id")
+                or (claims.get("claims") or {}).get("organization_id")
+            ),
+            auth_method="firebase",
         )
 
     # Demo auth — never available in production
-    if settings.demo_mode and not settings.is_production:
-        role = (x_demo_role or "admin").lower()
-        if role not in {"donor", "recipient", "admin"}:
-            raise HTTPException(400, "X-Demo-Role must be donor|recipient|admin")
-        return AuthUser(
-            uid=x_demo_user_id or f"demo-{role}",
-            email=f"{role}@demo.foodbridge.local",
-            role=role,
-            display_name=f"Demo {role.title()}",
-            recipient_id=x_demo_recipient_id,
-            auth_method="demo",
+    if settings.is_production or not settings.demo_mode:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required (Bearer Firebase ID token)",
         )
 
-    raise HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Authentication required",
+    role = (x_demo_role or "admin").lower()
+    if role not in {"donor", "recipient", "admin"}:
+        raise HTTPException(400, "X-Demo-Role must be donor|recipient|admin")
+    return AuthUser(
+        uid=x_demo_user_id or f"demo-{role}",
+        email=f"{role}@demo.foodbridge.local",
+        role=role,
+        display_name=f"Demo {role.title()}",
+        recipient_id=x_demo_recipient_id,
+        auth_method="demo",
     )
+
+
+def _as_optional_int(value) -> int | None:  # noqa: ANN001
+    if value is None or value == "":
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def require_roles(*roles: str):

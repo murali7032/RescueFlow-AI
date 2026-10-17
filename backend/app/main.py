@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -26,29 +27,70 @@ settings = get_settings()
 logging.basicConfig(level=getattr(logging, settings.log_level.upper(), logging.INFO))
 logger = logging.getLogger("foodbridge")
 
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    errors = settings.validate_for_runtime()
+    if errors:
+        for err in errors:
+            logger.error("Startup configuration error: %s", err)
+        raise RuntimeError(
+            "Invalid production configuration:\n- " + "\n- ".join(errors)
+        )
+
+    if settings.auto_create_tables:
+        Base.metadata.create_all(bind=engine)
+        logger.info("Ensured database tables exist (AUTO_CREATE_TABLES=true)")
+    else:
+        logger.info("AUTO_CREATE_TABLES=false — expecting migrations already applied")
+
+    logger.info(
+        "Started env=%s demo_mode=%s db=%s cors_origins=%s firebase=%s",
+        settings.environment,
+        settings.demo_mode and not settings.is_production,
+        "sqlite" if settings.is_sqlite else "postgresql",
+        settings.cors_origin_list,
+        bool(settings.firebase_project_id),
+    )
+    yield
+
+
 app = FastAPI(
     title=settings.app_name,
     version="1.0.0",
     description="AI-assisted surplus food recovery and allocation platform",
+    lifespan=lifespan,
+    docs_url="/docs" if settings.docs_enabled and not settings.is_production else None,
+    redoc_url="/redoc" if settings.docs_enabled and not settings.is_production else None,
 )
 
-# In development, also allow Google Cloud Shell Web Preview origins.
-# Prefer same-origin Vite proxy in Cloud Shell (avoids auth-cookie redirects).
 _cors_kw: dict = {
     "allow_origins": settings.cors_origin_list,
     "allow_credentials": True,
-    "allow_methods": ["*"],
-    "allow_headers": ["*"],
+    "allow_methods": ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    "allow_headers": [
+        "Authorization",
+        "Content-Type",
+        "X-Demo-Role",
+        "X-Demo-User-Id",
+        "X-Demo-Recipient-Id",
+        "X-Request-Id",
+    ],
 }
+
+# Dev-only helpers: Cloud Shell preview + optional custom regex.
+# Never enable open regexes in production.
 if not settings.is_production:
-    _cors_kw["allow_origin_regex"] = r"https://.*\.cloudshell\.dev$"
+    _cors_kw["allow_origin_regex"] = (
+        settings.cors_origin_regex or r"https://.*\.cloudshell\.dev$"
+    )
+elif settings.cors_origin_regex:
+    logger.warning(
+        "CORS_ORIGIN_REGEX is set but ignored when ENVIRONMENT=production; "
+        "list exact origins in CORS_ORIGINS instead."
+    )
 
 app.add_middleware(CORSMiddleware, **_cors_kw)
-
-if settings.auto_create_tables:
-    # Local/dev convenience. Prefer Alembic migrations in production.
-    Base.metadata.create_all(bind=engine)
-    logger.info("Ensured database tables exist (AUTO_CREATE_TABLES=true)")
 
 API_PREFIX = "/api/v1"
 app.include_router(donations.router, prefix=API_PREFIX)
@@ -59,6 +101,7 @@ app.include_router(allocations.router, prefix=API_PREFIX)
 app.include_router(matches.router, prefix=API_PREFIX)
 app.include_router(admin.router, prefix=API_PREFIX)
 app.include_router(ai.router, prefix=API_PREFIX)
+# Demo seed is still registered; the route itself refuses production.
 app.include_router(demo.router, prefix=API_PREFIX)
 
 
@@ -85,7 +128,8 @@ def health_v1():
 def root():
     return {
         "product": settings.app_name,
-        "docs": "/docs",
         "health": "/health",
         "api": API_PREFIX,
+        "environment": settings.environment,
+        "docs": "/docs" if settings.docs_enabled and not settings.is_production else None,
     }

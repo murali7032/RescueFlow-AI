@@ -1,16 +1,20 @@
+import { authMode, getIdToken } from "../auth/firebase";
+
 export type DemoRole = "donor" | "recipient" | "admin";
 
 export interface ApiClientOptions {
   baseUrl?: string;
   role?: DemoRole;
   recipientId?: number | null;
-  getToken?: () => string | null;
+  getToken?: () => string | null | Promise<string | null>;
 }
 
 /**
  * Cloud Shell Web Preview cannot call another preview port (e.g. 8000 from 5173):
  * the proxy injects an auth redirect that browsers reject on CORS preflight.
  * Use same-origin requests and let Vite proxy /api → localhost:8000.
+ *
+ * Production: set VITE_API_URL to the Cloud Run URL and VITE_AUTH_MODE=firebase.
  */
 function resolveDefaultBase(): string {
   const envUrl =
@@ -55,15 +59,24 @@ export function createApiClient(options: ApiClientOptions = {}) {
       ...(init.headers as Record<string, string> | undefined),
     };
 
-    const token = options.getToken?.();
+    const token =
+      (await options.getToken?.()) ??
+      (authMode() === "firebase" ? await getIdToken() : null);
+
     if (token) {
       headers.Authorization = `Bearer ${token}`;
-    } else {
+    } else if (authMode() === "demo") {
       headers["X-Demo-Role"] = options.role ?? "admin";
       headers["X-Demo-User-Id"] = `demo-${options.role ?? "admin"}`;
       if (options.recipientId != null) {
         headers["X-Demo-Recipient-Id"] = String(options.recipientId);
       }
+    } else {
+      throw new ApiError(
+        401,
+        "Not signed in. Firebase auth is required in production builds.",
+        null
+      );
     }
 
     const response = await fetch(`${baseUrl}${path}`, { ...init, headers });

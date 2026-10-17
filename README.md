@@ -91,4 +91,24 @@ Details: [docs/TESTING.md](docs/TESTING.md)
 
 ## Environment
 
-See `backend/.env.example`. Production must set `ENVIRONMENT=production`, `DEMO_MODE=false`, and a Postgres `DATABASE_URL`. Never commit secrets.
+See `backend/.env.example` and `deploy/env.production.example`.
+
+### Local
+- `DEMO_MODE=true`, SQLite, localhost `CORS_ORIGINS`
+- Frontends may omit `VITE_API_URL` (defaults to localhost or Cloud Shell proxy)
+
+### Production (Cloud Run + Cloud SQL + Firebase)
+Startup **fails closed** unless:
+- `ENVIRONMENT=production`
+- `DEMO_MODE=false`
+- `DATABASE_URL` → Postgres via Secret Manager (`foodbridge-database-url`)
+- `CORS_ORIGINS` → exact Firebase Hosting HTTPS origins (**no `*`**, no localhost-only)
+- `FIREBASE_PROJECT_ID` + `GOOGLE_CLOUD_PROJECT`
+
+```bash
+export CORS_ORIGINS="https://foodbridge-donor.web.app,https://foodbridge-recipient.web.app,https://foodbridge-admin.web.app"
+AUTO_CREATE_TABLES=true ./deploy/deploy.sh --cloudsql "$PROJECT:asia-south1:foodbridge-pg"
+./deploy/deploy_frontend.sh   # needs VITE_API_URL + VITE_FIREBASE_*
+```
+
+Full guide: [docs/GCP_DEPLOYMENT.md](docs/GCP_DEPLOYMENT.md). Never commit secrets.

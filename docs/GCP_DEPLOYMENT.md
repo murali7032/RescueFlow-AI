@@ -1,140 +1,186 @@
-# Google Cloud Deployment Guide (Cloud Shell)
+# Google Cloud Deployment Guide
 
-Region default: **asia-south1**. Use your existing project — never invent project IDs.
+Target stack: **Cloud Run** (API) · **Cloud SQL PostgreSQL** · **Secret Manager** · **Firebase Hosting + Auth** · **Vertex AI** (optional).
 
-## 1. Select project and region
+Default region: **asia-south1**. Use your existing project ID from `gcloud config get-value project`.
+
+---
+
+## 0. Production rules (enforced at API startup)
+
+When `ENVIRONMENT=production` the API **refuses to start** unless:
+
+| Variable | Requirement |
+|----------|-------------|
+| `DEMO_MODE` | `false` |
+| `DATABASE_URL` | PostgreSQL (not SQLite) |
+| `CORS_ORIGINS` | Exact `https://` Firebase Hosting origins, **no `*`** |
+| `FIREBASE_PROJECT_ID` | Set |
+| `GOOGLE_CLOUD_PROJECT` | Set |
+
+OpenAPI `/docs` is disabled in production. Demo seed endpoints return 403.
+
+---
+
+## 1. Project & APIs
 
 ```bash
 gcloud config get-value project
-# If empty:
-# gcloud config set project YOUR_PROJECT_ID
 gcloud config set run/region asia-south1
-```
 
-## 2. Inspect existing Cloud Run services
-
-```bash
-gcloud run services list --region=asia-south1
-```
-
-If a service named `foodbridge` already exists, decide whether to update it or deploy as `foodbridge-rescueflow` (default in `deploy/deploy.sh`) to avoid overwriting unrelated workloads.
-
-## 3. Enable APIs
-
-```bash
 gcloud services enable \
   run.googleapis.com \
   cloudbuild.googleapis.com \
   artifactregistry.googleapis.com \
   secretmanager.googleapis.com \
   sqladmin.googleapis.com \
-  aiplatform.googleapis.com
+  aiplatform.googleapis.com \
+  identitytoolkit.googleapis.com
 ```
 
-## 4. Database (Cloud SQL PostgreSQL)
+Inspect existing services before overwriting:
 
 ```bash
-# Create instance only if you do not already have one (costs apply while running)
+gcloud run services list --region=asia-south1
+```
+
+---
+
+## 2. Cloud SQL
+
+```bash
+# Skip create if you already have an instance
 gcloud sql instances create foodbridge-pg \
   --database-version=POSTGRES_15 \
   --tier=db-f1-micro \
   --region=asia-south1
 
 gcloud sql databases create foodbridge --instance=foodbridge-pg
-gcloud sql users create foodbridge --instance=foodbridge-pg --password=GENERATE_A_STRONG_PASSWORD
+gcloud sql users create foodbridge --instance=foodbridge-pg --password='GENERATE_STRONG_PASSWORD'
 ```
 
-Store connection string in Secret Manager:
+Store `DATABASE_URL` in Secret Manager (never as plain env in git):
 
 ```bash
 PROJECT=$(gcloud config get-value project)
 CONN="${PROJECT}:asia-south1:foodbridge-pg"
 printf 'postgresql+psycopg2://foodbridge:PASSWORD@/foodbridge?host=/cloudsql/%s' "$CONN" | \
   gcloud secrets create foodbridge-database-url --data-file=-
+# To rotate later:
+# printf '...' | gcloud secrets versions add foodbridge-database-url --data-file=-
 ```
 
-## 5. Deploy backend
+---
 
-From repo root (Cloud Shell clone of this repository):
+## 3. Firebase (Auth + Hosting)
+
+1. Firebase console → add/use project (can match GCP project).
+2. Enable **Authentication** (Email/Password and/or Google).
+3. Create three Hosting sites: `foodbridge-donor`, `foodbridge-recipient`, `foodbridge-admin` (names must match `firebase.json`).
+4. Register three web apps; copy config into frontend `.env.production` (`VITE_FIREBASE_*`).
+5. Set **custom claims** on users (Admin SDK / Cloud Function), e.g. `{ "role": "donor" }` or `{ "role": "recipient", "recipient_id": 1 }`.
 
 ```bash
-chmod +x deploy/deploy.sh deploy/smoke_test.sh
-./deploy/deploy.sh --service foodbridge-rescueflow --region asia-south1
+cp .firebaserc.example .firebaserc
+# edit default project id
+npm i -g firebase-tools
+firebase login
+firebase target:apply hosting foodbridge-donor foodbridge-donor  # if using targets; sites in firebase.json work with --only hosting
 ```
 
-Attach Cloud SQL (after first deploy if needed):
+---
+
+## 4. Deploy API (Cloud Run)
 
 ```bash
-PROJECT=$(gcloud config get-value project)
+chmod +x deploy/*.sh
+
+# First boot only — create tables once, then redeploy with AUTO_CREATE_TABLES=false
+export CORS_ORIGINS="https://foodbridge-donor.web.app,https://foodbridge-recipient.web.app,https://foodbridge-admin.web.app"
+export FIREBASE_PROJECT_ID="$(gcloud config get-value project)"
+export CLOUDSQL_INSTANCE="$(gcloud config get-value project):asia-south1:foodbridge-pg"
+
+AUTO_CREATE_TABLES=true ./deploy/deploy.sh \
+  --cors-origins "$CORS_ORIGINS" \
+  --firebase-project "$FIREBASE_PROJECT_ID" \
+  --cloudsql "$CLOUDSQL_INSTANCE"
+
+# Steady state
+AUTO_CREATE_TABLES=false ./deploy/deploy.sh \
+  --cors-origins "$CORS_ORIGINS" \
+  --firebase-project "$FIREBASE_PROJECT_ID" \
+  --cloudsql "$CLOUDSQL_INSTANCE"
+```
+
+The script mounts secret `foodbridge-database-url` → `DATABASE_URL`, sets production flags, and attaches Cloud SQL.
+
+Update CORS after Hosting URLs are known (if different from `.web.app` defaults):
+
+```bash
 gcloud run services update foodbridge-rescueflow \
   --region=asia-south1 \
-  --add-cloudsql-instances=${PROJECT}:asia-south1:foodbridge-pg \
-  --update-secrets=DATABASE_URL=foodbridge-database-url:latest \
-  --set-env-vars=ENVIRONMENT=production,DEMO_MODE=false,AUTO_CREATE_TABLES=true
+  --update-env-vars="CORS_ORIGINS=https://YOUR-donor.web.app,https://YOUR-recipient.web.app,https://YOUR-admin.web.app"
 ```
+
+---
+
+## 5. Deploy frontends
+
+```bash
+export VITE_API_URL="$(gcloud run services describe foodbridge-rescueflow --region=asia-south1 --format='value(status.url)')"
+export VITE_AUTH_MODE=firebase
+export VITE_FIREBASE_API_KEY=...
+export VITE_FIREBASE_AUTH_DOMAIN=YOUR_PROJECT.firebaseapp.com
+export VITE_FIREBASE_PROJECT_ID=YOUR_PROJECT
+export VITE_FIREBASE_APP_ID=...
+
+./deploy/deploy_frontend.sh
+```
+
+Or build each app manually from `frontend/*/ .env.production.example`.
+
+---
 
 ## 6. Smoke test
 
 ```bash
 URL=$(gcloud run services describe foodbridge-rescueflow --region=asia-south1 --format='value(status.url)')
 ./deploy/smoke_test.sh "$URL"
-curl -s "$URL/health"
+# Expect health 200; demo seed should be blocked (403) in production
 ```
 
-## 7. Frontend (Firebase Hosting — optional)
+Authenticated API checks require a real Firebase ID token (`Authorization: Bearer …`).
 
-```bash
-# Install Firebase CLI if needed
-npm install -g firebase-tools
-firebase login
-```
+---
 
-For each app (`donor`, `recipient`, `admin`):
+## 7. IAM (least privilege)
 
-```bash
-cd frontend/donor
-echo "VITE_API_URL=$URL" > .env.production
-npm install && npm run build
-```
+Runtime compute SA typically needs:
 
-Configure three Hosting sites or three directories in `firebase.json` pointing at each `dist/`. Set rewrite to `index.html` for SPA refresh.
+- `roles/secretmanager.secretAccessor` on `foodbridge-database-url`
+- `roles/cloudsql.client`
+- `roles/aiplatform.user` (if Gemini enabled)
 
-**Manual console steps:** create Firebase project (can share GCP project), enable Hosting, add web apps, copy config. For Authentication, enable Email/Google providers and set custom claims `role` / `recipient_id` via Admin SDK — until then use local demo headers only (`DEMO_MODE` must stay false in production API).
+Do **not** grant Owner/Editor to make deploy work.
 
-## 8. Vertex AI / Gemini
+---
 
-Grant the Cloud Run runtime service account `roles/aiplatform.user`. Set:
+## 8. Cost & cleanup
 
-- `GOOGLE_CLOUD_PROJECT`
-- `GOOGLE_CLOUD_LOCATION=asia-south1`
-- `GOOGLE_GENAI_USE_VERTEXAI=true`
-- `AI_ENABLED=true`
-
-If model access fails, API explanations fall back automatically.
-
-## 9. IAM notes
-
-Prefer least privilege:
-
-- Cloud Run invoker (if private)
-- Secret Accessor on specific secrets
-- Cloud SQL Client
-- Vertex AI User
-
-If source deploy fails with Cloud Build permission errors, grant the Cloud Build service account `roles/run.admin` and `roles/iam.serviceAccountUser` on the runtime SA — not project Owner.
-
-## 10. Cost drivers & cleanup
-
-Idle cost drivers: Cloud SQL instance, Cloud Run (minimal when scaled to zero), Artifact Registry images, Vertex usage.
-
-Cleanup demo resources:
+Charges while idle: Cloud SQL instance (largest), Artifact Registry, Vertex usage.
 
 ```bash
 gcloud run services delete foodbridge-rescueflow --region=asia-south1
-# Only if created solely for this demo:
-# gcloud sql instances delete foodbridge-pg
+# gcloud sql instances delete foodbridge-pg   # destructive
 ```
 
-## Temporary alternative
+---
 
-If Cloud SQL blocks the demo, deploy with SQLite **ephemeral** disk (`DATABASE_URL=sqlite:////tmp/foodbridge.db`) — data resets on new revisions and **does not** provide production concurrency. Label this clearly; do not claim Cloud SQL guarantees.
+## Local vs production auth
+
+| Mode | Frontend | Backend |
+|------|----------|---------|
+| Local / Cloud Shell | `VITE_AUTH_MODE` unset → demo headers | `DEMO_MODE=true`, localhost CORS / Vite proxy |
+| Production | `VITE_AUTH_MODE=firebase` + Bearer token | `DEMO_MODE=false`, `CORS_ORIGINS=https://…` |
+
+Never enable demo headers on a public Cloud Run service.
