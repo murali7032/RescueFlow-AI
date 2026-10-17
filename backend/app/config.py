@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
 
     # CORS — comma-separated origins. Never use * with credentials in production.
-    cors_origins: str = "http://localhost:5173,http://localhost:5174,http://localhost:5175"
+    cors_origins: str = "http://localhost:5173,http://localhost:5174,http://localhost:5175,http://127.0.0.1:5173,http://127.0.0.1:5174,http://127.0.0.1:5175"
 
     # Firebase (optional). When unset, demo auth may be used if demo_mode=True.
     firebase_project_id: str | None = None
@@ -65,7 +65,7 @@ def get_settings() -> Settings:
         environment=os.getenv("ENVIRONMENT", "development"),
         cors_origins=os.getenv(
             "CORS_ORIGINS",
-            "http://localhost:5173,http://localhost:5174,http://localhost:5175",
+            "http://localhost:5173,http://localhost:5174,http://localhost:5175,http://127.0.0.1:5173,http://127.0.0.1:5174,http://127.0.0.1:5175",
         ),
         firebase_project_id=os.getenv("FIREBASE_PROJECT_ID"),
         google_cloud_project=os.getenv("GOOGLE_CLOUD_PROJECT"),
