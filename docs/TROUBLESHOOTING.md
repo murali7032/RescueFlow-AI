@@ -1,0 +1,47 @@
+# Troubleshooting
+
+## Python / pip
+
+- **Locked `uvicorn.exe` on Windows:** stop the running API process, or use a fresh venv (`.venv_ci`).
+- **Import `app` fails:** set `PYTHONPATH` to the `backend` directory.
+- **Schema mismatch after model changes:** delete local `foodbridge.db` or set a new `DATABASE_URL`; with `AUTO_CREATE_TABLES=true` tables are created but not migrated.
+
+## Node / Vite
+
+- **Alias `@foodbridge/shared` not found:** ensure `vite.config.ts` points to `../shared`.
+- **Build fails on TS:** run `npx tsc --noEmit` in the app folder for details.
+- **Blank API calls:** set `VITE_API_URL` to the backend origin (no trailing slash).
+
+## Database
+
+- **SQLite `database is locked`:** close other uvicorn processes; avoid concurrency tests on SQLite.
+- **Postgres connection refused:** verify Cloud SQL Auth Proxy / `--add-cloudsql-instances` and secret `DATABASE_URL`.
+- **FOR UPDATE no-op on SQLite:** expected; use Postgres for concurrency proof.
+
+## CORS
+
+- Browser blocked: add the exact frontend origin to `CORS_ORIGINS` (comma-separated). Production must not use `*` with credentials.
+
+## Auth
+
+- **401 in production:** demo headers are disabled when `ENVIRONMENT=production`. Configure Firebase and send Bearer tokens.
+- **403 role:** check `X-Demo-Role` or Firebase custom claim `role`.
+- **Recipient 400:** set `X-Demo-Recipient-Id` or `?recipient_id=`.
+
+## Cloud Run
+
+- Container must listen on `0.0.0.0:$PORT` (Dockerfile uses uvicorn `--port ${PORT}`).
+- Source deploy IAM errors: grant Cloud Build SA permission to act as the runtime service account.
+- Inspect before overwrite: `gcloud run services list`.
+
+## Vertex AI
+
+- Missing project/location → fallback explanations (`source: fallback`).
+- Permission denied → grant `roles/aiplatform.user` to runtime SA.
+- Timeouts → increase `AI_TIMEOUT` only if needed; product continues without AI.
+
+## Stale invitations / conflicts
+
+- Accept returns 409 “stale” → refresh matches; suggested quantity exceeded remaining/capacity.
+- Duplicate accept → 409 already accepted/cancelled.
+- After partial accept, offers rebalance; sums of **pending** suggestions ≤ remaining stock.
