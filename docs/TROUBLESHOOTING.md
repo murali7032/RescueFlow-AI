@@ -53,6 +53,7 @@ Restart Vite after pulling this change so the proxy loads.
 - Container must listen on `0.0.0.0:$PORT` (Dockerfile uses uvicorn `--port ${PORT}`).
 - Source deploy IAM errors: grant Cloud Build SA permission to act as the runtime service account.
 - Inspect before overwrite: `gcloud run services list`.
+- **`column donations.donor_type does not exist` / dashboard returns 500:** the new backend revision is running against a database that has not been migrated. In Cloud SQL Studio, select the same `foodbridge` database configured in the Cloud Run `DATABASE_URL` secret and run `backend/app/db/migrations/20261018_donor_reviews.sql`. If the timeout-and-rematch feature is deployed too, also run `20261018_invitation_expiry.sql`. Retry the dashboard after both scripts complete; a backend redeploy is not needed for a schema-only fix. Verify with `SELECT column_name FROM information_schema.columns WHERE table_name = 'donations' AND column_name = 'donor_type';`.
 
 ## Vertex AI
 
