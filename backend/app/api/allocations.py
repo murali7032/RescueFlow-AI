@@ -8,6 +8,7 @@ from app.auth import AuthUser, get_current_user, require_roles
 from app.db.models import Allocation, Donation, DonationReview, Recipient
 from app.db.session import get_db
 from app.schemas import DonationReviewCreate, PickupUpdate
+from app.services.audit import record_event
 from app.services.allocations import update_pickup_status
 
 router = APIRouter(prefix="/allocations", tags=["allocations"])
