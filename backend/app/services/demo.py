@@ -24,9 +24,38 @@ _DEMO_FIREBASE_UIDS = ("demo-donor", "demo-recipient-a", "demo-admin")
 
 def reset_demo_data(db: Session) -> None:
     """Remove demo-tagged rows and audit history tied to those rows."""
+    demo_organization_ids = [
+        r[0]
+        for r in db.query(Organization.id)
+        .filter(Organization.name.like("Demo %"))
+        .all()
+    ]
+    demo_created_donation_ids = set()
+    for (entity_id,) in (
+        db.query(AuditEvent.entity_id)
+        .filter(
+            AuditEvent.entity_type == "donation",
+            AuditEvent.actor_id.in_(_DEMO_FIREBASE_UIDS),
+        )
+        .all()
+    ):
+        try:
+            demo_created_donation_ids.add(int(entity_id))
+        except (TypeError, ValueError):
+            continue
+
+    donation_filters = [Donation.is_demo.is_(True)]
+    if demo_organization_ids:
+        donation_filters.append(
+            Donation.organization_id.in_(demo_organization_ids)
+        )
+    if demo_created_donation_ids:
+        donation_filters.append(
+            Donation.id.in_(demo_created_donation_ids)
+        )
     demo_donation_ids = [
         r[0]
-        for r in db.query(Donation.id).filter(Donation.is_demo.is_(True)).all()
+        for r in db.query(Donation.id).filter(or_(*donation_filters)).all()
     ]
     demo_recipient_ids = [
         r[0]
@@ -133,9 +162,10 @@ def reset_demo_data(db: Session) -> None:
             synchronize_session=False
         )
 
-    db.query(Organization).filter(
-        Organization.name.like("Demo %")
-    ).delete(synchronize_session=False)
+    if demo_organization_ids:
+        db.query(Organization).filter(
+            Organization.id.in_(demo_organization_ids)
+        ).delete(synchronize_session=False)
     db.commit()
 
 

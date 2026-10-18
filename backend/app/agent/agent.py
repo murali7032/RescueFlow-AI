@@ -7,7 +7,10 @@ explains rankings and suggests recovery actions from provided snapshots.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import re
+from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -17,27 +20,98 @@ from app.config import get_settings
 
 logger = logging.getLogger(__name__)
 
+_SYSTEM_INSTRUCTION = """You are FoodBridge RescueFlow's operational explainer. Explain matching and recovery decisions to a busy donor or administrator in plain, respectful language.
+
+Use only the supplied facts. Never invent a recipient, reason, quantity, deadline, status, or outcome. Do not change allocations or imply that an offer is accepted when it is only pending. A match score is a relative ranking score out of 100, not a probability or guarantee. Distinguish an invitation, an allocation, and a confirmed/completed pickup.
+
+For a donation explanation, state the current status and portions remaining; explain the top pending offer(s) with the score and the strongest supplied reasons (fit, capacity, collection timing, and estimated distance when present); explain what happens next and give one practical next step. For an admin recovery summary, state the number of affected donations and portions at risk, explain why the listed donations need attention, and clarify the next operational action. If there is no recovery work, say so clearly and explain that pending offers are still awaiting responses or no remaining stock needs a rematch, only when the facts support it.
+
+Return 3–5 complete sentences, normally 60–120 words. Use normal prose, not JSON, equations, fragments, or raw database fields. Do not show ISO timestamps or seconds; express dates and times in readable form if needed. Avoid repeating every fact when a shorter explanation is clearer. If information is missing, omit it rather than guessing."""
+
+
+def _format_time(value: str | None) -> str | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        parsed = parsed.astimezone(timezone.utc)
+        hour = parsed.strftime("%I:%M %p").lstrip("0")
+        return f"{parsed.strftime('%b %d, %Y')} at {hour} UTC"
+    except (TypeError, ValueError):
+        return None
+
+
+def _friendly_reasons(reasons: list[str]) -> list[str]:
+    friendly = []
+    for reason in reasons:
+        time_match = re.fullmatch(r"Can collect by (.+?) before deadline (.+)", reason)
+        if time_match:
+            collect_by = _format_time(time_match.group(1))
+            deadline = _format_time(time_match.group(2))
+            if collect_by and deadline:
+                friendly.append(
+                    f"can collect by {collect_by}, ahead of the {deadline} deadline"
+                )
+        elif reason.startswith("Capacity ") and reason.endswith(" portions available"):
+            amount = reason.removeprefix("Capacity ").removesuffix(" portions available")
+            friendly.append(f"has capacity for {amount} portions")
+        elif reason.startswith("Synthetic distance ~"):
+            distance = reason.removeprefix("Synthetic distance ~").removesuffix(
+                " from pickup"
+            )
+            friendly.append(f"is an estimated {distance} km from pickup")
+        elif reason.startswith("Prefers "):
+            friendly.append(reason[0].lower() + reason[1:])
+    return friendly
+
+
+def _usable_explanation(text: str | None) -> str | None:
+    if not text:
+        return None
+    cleaned = " ".join(text.strip().split()).strip('"“”')
+    words = cleaned.split()
+    if not 35 <= len(words) <= 160 or cleaned[-1:] not in ".!?":
+        logger.info(
+            "Gemini returned an incomplete or out-of-range explanation; "
+            "using deterministic copy"
+        )
+        return None
+    return cleaned
+
 
 def _fallback_explain(snapshot: dict, db: Session) -> dict[str, Any]:
     matches = snapshot.get("matches") or []
     donation = snapshot["donation"]
+    remaining = donation["remaining_portions"]
+    total = donation["total_portions"]
     lines = [
-        f"Donation #{donation['id']} from {donation['donor_name']}: "
-        f"{donation['remaining_portions']}/{donation['total_portions']} "
-        f"{donation['category']} portions remain (status: {donation['status']})."
+        f"Donation #{donation['id']} from {donation['donor_name']} has "
+        f"{remaining} of {total} {donation['category']} portions remaining. "
+        f"Its current status is {donation['status'].replace('_', ' ')}."
     ]
     pending = [m for m in matches if m.get("status") == "pending"]
     declined = [m for m in matches if m.get("status") == "declined"]
     accepted = [m for m in matches if m.get("status") == "accepted"]
 
     if pending:
-        lines.append("Ranked pending offers (deterministic scores):")
-        for m in pending[:5]:
+        lines.append("The highest-ranked pending offers are:")
+        for rank, m in enumerate(pending[:3], start=1):
             name = get_recipient_name(db, m["recipient_id"])
-            reasons = "; ".join((m.get("reasons") or [])[:2])
+            reasons = _friendly_reasons(m.get("reasons") or [])
+            reason_text = "; ".join(reasons[:3])
+            details = f" Reasons: {reason_text}." if reason_text else ""
+            expires = _format_time(m.get("expires_at"))
+            response_due = (
+                f" The offer is awaiting a response by {expires}."
+                if expires
+                else " The offer is awaiting a response."
+            )
             lines.append(
-                f"- {name}: score {m['score']}, offer {m['suggested_portions']} "
-                f"portions. {reasons}"
+                f"{name} is ranked #{rank} with a match score of "
+                f"{m['score']}/100 and an offer for {m['suggested_portions']} portions."
+                f"{details}{response_due}"
             )
     if declined:
         lines.append(
@@ -46,19 +120,25 @@ def _fallback_explain(snapshot: dict, db: Session) -> dict[str, Any]:
         )
     if accepted:
         lines.append(
-            f"{len(accepted)} acceptance(s) allocated; pickup remains separate "
-            "until explicitly confirmed."
+            f"{len(accepted)} recipient offer(s) have been accepted and allocated. "
+            "Pickup is a separate step and is not complete until it is confirmed."
         )
 
     actions: list[str] = []
     if donation["remaining_portions"] > 0 and not pending:
-        actions.append("Trigger recovery rematch for remaining portions")
+        actions.append(
+            "Run recovery matching for the remaining portions if the pickup deadline is still open."
+        )
     if pending:
-        actions.append("Wait for recipient responses or follow up on top-ranked offer")
+        actions.append(
+            "Wait for the recipient response; if the offer expires, the timeout job can rematch the remaining portions before the pickup deadline."
+        )
     if declined:
-        actions.append("Review declined recipients; default policy blocks auto re-invite")
+        actions.append(
+            "Review the declines; recipients who already declined are not automatically invited again."
+        )
     if not actions:
-        actions.append("Monitor pickup confirmation for allocated portions")
+        actions.append("Monitor pickup confirmation for the accepted allocation.")
 
     return {
         "source": "fallback",
@@ -93,8 +173,9 @@ async def _call_gemini(prompt: str) -> str | None:
                 model=settings.gemini_model,
                 contents=prompt,
                 config=types.GenerateContentConfig(
+                    system_instruction=_SYSTEM_INSTRUCTION,
                     temperature=0.2,
-                    max_output_tokens=512,
+                    max_output_tokens=320,
                 ),
             )
             return (response.text or "").strip()
@@ -124,15 +205,13 @@ async def explain_match(db: Session, donation_id: int) -> dict[str, Any]:
 
     fallback = _fallback_explain(snapshot, db)
     prompt = (
-        "You are RescueFlow AI explaining surplus-food recovery decisions. "
-        "Use ONLY the JSON facts below. Do not invent recipients, pickups, "
-        "or impact metrics. Do not allocate food. Be concise (under 180 words).\n\n"
-        f"FACTS:\n{snapshot}\n\n"
-        "Explain why recipients were ranked, note any declines/recovery, "
-        "and suggest next operational steps."
+        "Explain this donation's current matching outcome for the donor. "
+        "Prioritize the best pending offer and explain why it fits, what its "
+        "status means, and the next step.\nFACTS (JSON):\n"
+        + json.dumps(snapshot, ensure_ascii=False, default=str)
     )
 
-    text = await _call_gemini(prompt)
+    text = _usable_explanation(await _call_gemini(prompt))
     if text:
         return {
             "donation_id": donation_id,
@@ -152,29 +231,53 @@ async def explain_recovery(db: Session) -> dict[str, Any]:
 
     context = get_recovery_context(db)
     needing = context.get("donations_needing_recovery") or []
-    if not needing:
-        summary = "No donations currently need recovery. All open surplus has pending offers or is fully allocated."
-        return {"source": "fallback", "summary": summary, "context": context}
-
-    lines = [
-        f"{len(needing)} donation(s) need recovery attention; "
-        f"{context.get('total_remaining_portions_at_risk', 0)} portions remain at risk."
-    ]
-    for d in needing[:5]:
+    lines = []
+    if needing:
         lines.append(
-            f"Donation #{d['donation_id']} ({d['donor_name']}): "
-            f"{d['remaining_portions']} remaining, "
-            f"{d['declined_invitations']} declines, "
-            f"{d['pending_invitations']} pending."
+            f"{len(needing)} donation(s) need recovery attention; "
+            f"{context.get('total_remaining_portions_at_risk', 0)} portions remain at risk."
+        )
+    else:
+        lines.append(
+            "No donations are currently flagged for recovery, so no rematch is needed right now."
+        )
+    for d in needing[:5]:
+        reasons = []
+        if d["declined_invitations"]:
+            reasons.append(f"{d['declined_invitations']} recipient(s) declined")
+        if not d["pending_invitations"]:
+            reasons.append("no offer is waiting for a response")
+        if d["pending_invitations"]:
+            reasons.append(
+                f"{d['pending_invitations']} offer(s) are still awaiting a response"
+            )
+        if d["minutes_to_deadline"] <= 0:
+            urgency = "the pickup deadline has passed or is due"
+        elif d["minutes_to_deadline"] <= 60:
+            urgency = f"about {d['minutes_to_deadline']} minutes remain before pickup deadline"
+        else:
+            urgency = "the pickup deadline is still ahead"
+        lines.append(
+            f"Donation #{d['donation_id']} from {d['donor_name']} has "
+            f"{d['remaining_portions']} portions left; "
+            f"{'; '.join(reasons)}. {urgency}."
         )
 
     fallback_summary = " ".join(lines)
+    facts = {
+        "donations_needing_recovery": needing[:5],
+        "count": context.get("count", 0),
+        "total_remaining_portions_at_risk": context.get(
+            "total_remaining_portions_at_risk", 0
+        ),
+    }
     prompt = (
-        "Summarize surplus-food recovery status for an admin. "
-        "Use ONLY these facts. Do not invent metrics.\n"
-        f"{context}"
+        "Explain the current recovery queue for an administrator. State the "
+        "scale of the issue, why the listed donations need action, and what "
+        "to do next. If the queue is empty, explain that clearly.\nFACTS (JSON):\n"
+        + json.dumps(facts, ensure_ascii=False, default=str)
     )
-    text = await _call_gemini(prompt)
+    text = _usable_explanation(await _call_gemini(prompt))
     return {
         "source": "gemini" if text else "fallback",
         "summary": text or fallback_summary,
