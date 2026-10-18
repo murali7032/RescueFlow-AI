@@ -9,6 +9,7 @@ import {
   PageHeader,
   Stat,
 } from "@foodbridge/shared/components/ui";
+import { AIExplanation } from "@foodbridge/shared/components/AIExplanation";
 import type { AdminDashboard } from "@foodbridge/shared/types";
 import { useApi } from "../hooks/useApi";
 
@@ -224,7 +225,7 @@ export default function AdminDashboardPage() {
                 Refresh
               </Button>
             </div>
-            {aiSummary ? <div className="ai-summary"><span className="badge">Summary · {aiSource}</span><Banner tone="info"><p>{aiSummary}</p></Banner></div> : null}
+            {aiSummary ? <div className="ai-summary"><span className="badge">Summary · {aiSource}</span><AIExplanation text={aiSummary} /></div> : null}
             {!recovery?.donations_needing_recovery?.length ? (
               <Empty>No donations currently flagged for recovery.</Empty>
             ) : (

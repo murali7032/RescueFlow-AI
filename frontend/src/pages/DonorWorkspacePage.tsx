@@ -9,6 +9,7 @@ import {
   PageHeader,
   Stat,
 } from "@foodbridge/shared/components/ui";
+import { AIExplanation } from "@foodbridge/shared/components/AIExplanation";
 import type {
   Donation,
   ExplainMatchResponse,
@@ -334,7 +335,7 @@ export default function DonorWorkspacePage() {
 
             {explanation ? (
               <Card title="Recovery explanation (Gemini)" tone="accent">
-                <p>{explanation.summary}</p>
+                <AIExplanation text={explanation.summary} />
                 {explanation.suggested_actions?.length ? (
                   <ul>
                     {explanation.suggested_actions.map((a) => (

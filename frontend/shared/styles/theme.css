@@ -376,6 +376,27 @@ textarea {
 .review-star.selected { color: #d58a00; }
 .ai-summary { display: grid; gap: 0.65rem; }
 .ai-summary p { margin: 0; line-height: 1.65; }
+.ai-explanation {
+  display: grid;
+  gap: 0.85rem;
+  max-width: 72ch;
+  color: var(--text, #263238);
+}
+.ai-explanation p { margin: 0; line-height: 1.7; }
+.ai-explanation h3 {
+  margin: 0.3rem 0 -0.35rem;
+  color: var(--ink, #173b35);
+  font-size: 0.96rem;
+}
+.ai-explanation ul {
+  display: grid;
+  gap: 0.45rem;
+  margin: 0;
+  padding-left: 1.25rem;
+  line-height: 1.6;
+}
+.ai-explanation li { padding-left: 0.15rem; }
+.ai-explanation strong { color: #173b35; }
 .donor-type-select { min-width: 190px; }
 
 .btn:disabled {
