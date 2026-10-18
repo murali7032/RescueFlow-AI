@@ -78,6 +78,25 @@ def test_offers_do_not_exceed_stock(db_session, seed_recipients):
     # D must not receive an invitation
     d_id = seed_recipients[3].id
     assert all(i.recipient_id != d_id for i in pending)
+    assert donation.status == "invited"
+
+
+def test_matching_status_does_not_block_eligibility(db_session, seed_recipients):
+    """Regression: create_invitations sets status=matching before ranking."""
+    donation = _donation(portions=120)
+    db_session.add(donation)
+    db_session.commit()
+
+    # Simulate mid-algorithm status used inside create_invitations.
+    donation.status = "matching"
+    ok, _ = is_eligible(donation, seed_recipients[0])
+    assert ok is True
+
+    donation.status = "open"
+    created = create_invitations(db_session, donation)
+    db_session.commit()
+    assert len(created) >= 1
+    assert donation.status == "invited"
 
 
 def test_compatible_category_only(db_session, seed_recipients):

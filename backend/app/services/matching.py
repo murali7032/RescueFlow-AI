@@ -30,9 +30,10 @@ def _score_recipient(
     settings = get_settings()
     deadline = as_utc(donation.pickup_deadline)
     pickup = as_utc(recipient.earliest_pickup)
+    effective_pickup = pickup if pickup > now else now
 
     total_window = max((deadline - now).total_seconds(), 1)
-    time_left_after_pickup = max((deadline - pickup).total_seconds(), 0)
+    time_left_after_pickup = max((deadline - effective_pickup).total_seconds(), 0)
 
     deadline_score = time_left_after_pickup / total_window
     capacity_score = min(
@@ -74,7 +75,7 @@ def _score_recipient(
     if preference_score >= 1.0:
         reasons.append(f"Prefers {donation.category} meals")
     reasons.append(
-        f"Can collect by {pickup.isoformat()} before deadline {deadline.isoformat()}"
+        f"Can collect by {effective_pickup.isoformat()} before deadline {deadline.isoformat()}"
     )
     reasons.append(f"Capacity {recipient.available_capacity} portions available")
     reasons.append(
@@ -96,7 +97,14 @@ def is_eligible(
     now = now or datetime.now(timezone.utc)
     deadline = as_utc(donation.pickup_deadline)
 
-    if donation.status not in {"open", "invited", "no_match", "partially_allocated"}:
+    # "matching" is set while create_invitations() runs — must remain eligible.
+    if donation.status not in {
+        "open",
+        "matching",
+        "invited",
+        "no_match",
+        "partially_allocated",
+    }:
         return False, f"Donation status is {donation.status}"
     if donation.remaining_portions <= 0:
         return False, "No remaining portions"
@@ -110,9 +118,9 @@ def is_eligible(
         return False, "Food category not accepted"
 
     pickup = as_utc(recipient.earliest_pickup)
-    if pickup < now:
-        return False, "Earliest pickup is in the past"
-    if pickup > deadline:
+    # Past earliest_pickup means the kitchen is already ready (available now).
+    effective_pickup = pickup if pickup > now else now
+    if effective_pickup > deadline:
         return False, "Cannot collect before donation deadline"
 
     if prior_invitation and prior_invitation.status in (
@@ -179,7 +187,13 @@ def create_invitations(db: Session, donation: Donation) -> list[Invitation]:
     """
     now = datetime.now(timezone.utc)
 
-    if donation.status not in {"open", "partially_allocated", "no_match", "invited"}:
+    if donation.status not in {
+        "open",
+        "matching",
+        "partially_allocated",
+        "no_match",
+        "invited",
+    }:
         return []
     if donation.remaining_portions <= 0:
         return []
@@ -187,7 +201,8 @@ def create_invitations(db: Session, donation: Donation) -> list[Invitation]:
         donation.status = "expired"
         return []
 
-    # Diagram: enter MATCHING while the algorithm runs
+    # Diagram: enter MATCHING while the algorithm runs.
+    # Eligibility must treat "matching" as allowed (see is_eligible).
     prev_status = donation.status
     donation.status = "matching"
     db.flush()
