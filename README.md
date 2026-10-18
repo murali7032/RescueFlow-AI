@@ -12,7 +12,7 @@ AI-assisted surplus food recovery and allocation for the AI Builder Cup 2026.
 - Transaction-minded allocations (Postgres row locks for concurrency)
 - Admin dashboard with live metrics, recovery queue, audit trail
 - Gemini explanations via Vertex AI with deterministic fallback
-- Demo mode with eight synthetic recipient organizations across multiple capacities and food categories (Kitchen D infeasible by deadline)
+- Demo mode with eleven synthetic recipient organizations across multiple capacities and food categories (Kitchen D infeasible by deadline)
 
 ## Architecture
 

@@ -11,16 +11,35 @@ def test_health(client):
     assert r2.status_code == 200
 
 
-def test_create_donation_and_matches(client, auth_headers, seed_recipients, future_deadline):
-    # seed_recipients uses db_session; need same DB as client.
-    # Re-seed via API demo endpoint instead.
-    pass
+def test_create_donation_and_matches(client, auth_headers, future_deadline):
+    client.post("/api/v1/demo/seed", headers=auth_headers("admin"))
+    created = client.post(
+        "/api/v1/donations",
+        headers=auth_headers("donor"),
+        json={
+            "donor_name": "Harbor Bistro",
+            "category": "vegetarian",
+            "total_portions": 120,
+            "pickup_deadline": future_deadline,
+            "is_demo": True,
+        },
+    )
+    assert created.status_code == 201
+    assert created.json()["status"] == "invited"
+    matches = client.get(
+        f"/api/v1/donations/{created.json()['id']}/matches",
+        headers=auth_headers("donor"),
+    )
+    assert matches.status_code == 200
+    pending = [match for match in matches.json() if match["status"] == "pending"]
+    assert pending
+    assert sum(match["suggested_portions"] for match in pending) <= 120
 
 
 def test_demo_seed_and_donation_flow(client, auth_headers, future_deadline):
     seed = client.post("/api/v1/demo/seed", headers=auth_headers("admin"))
     assert seed.status_code == 200
-    assert seed.json()["count"] == 8
+    assert seed.json()["count"] == 11
 
     create = client.post(
         "/api/v1/donations",
@@ -53,20 +72,72 @@ def test_demo_seed_and_donation_flow(client, auth_headers, future_deadline):
     d = next(r for r in recipients if r["name"] == "Community Kitchen D")
     assert all(m["recipient_id"] != d["id"] for m in pending)
 
+    recipients_all = client.get(
+        "/api/v1/recipients?active_only=false", headers=auth_headers("admin")
+    ).json()
+    by_name = {recipient["name"]: recipient for recipient in recipients_all}
+    excluded = {
+        by_name[name]["id"]
+        for name in (
+            "Community Kitchen D",
+            "Zero-Capacity Kitchen I",
+            "Inactive Kitchen J",
+            "Meat-Only Pantry K",
+        )
+    }
+    assert all(m["recipient_id"] not in excluded for m in pending)
+    assert by_name["Zero-Capacity Kitchen I"]["available_capacity"] == 0
+    assert by_name["Inactive Kitchen J"]["active"] is False
+    assert by_name["Meat-Only Pantry K"]["accepted_categories"] == ["meat"]
 
-def test_reject_invalid_quantity(client, auth_headers, future_deadline):
+
+def test_demo_seed_is_repeatable_and_force_reseeds(client, auth_headers):
+    first = client.post("/api/v1/demo/seed", headers=auth_headers("admin"))
+    repeat = client.post("/api/v1/demo/seed", headers=auth_headers("admin"))
+    reset = client.post(
+        "/api/v1/demo/seed?force=true", headers=auth_headers("admin")
+    )
+    assert first.json()["count"] == 11
+    assert repeat.json()["count"] == 11
+    assert repeat.json()["reset"] is False
+    assert reset.json()["count"] == 11
+    assert reset.json()["reset"] is True
+
+
+def test_mixed_donation_has_no_compatible_seeded_recipients(
+    client, auth_headers, future_deadline
+):
     client.post("/api/v1/demo/seed", headers=auth_headers("admin"))
-    r = client.post(
+    response = client.post(
         "/api/v1/donations",
         headers=auth_headers("donor"),
         json={
-            "donor_name": "X",
-            "category": "vegetarian",
-            "total_portions": 0,
+            "donor_name": "Harbor Bistro",
+            "category": "mixed",
+            "total_portions": 40,
             "pickup_deadline": future_deadline,
+            "is_demo": True,
         },
     )
-    assert r.status_code == 422
+    assert response.status_code == 201
+    assert response.json()["status"] == "no_match"
+    assert response.json()["invitations_created"] == 0
+
+
+def test_reject_invalid_quantity(client, auth_headers, future_deadline):
+    client.post("/api/v1/demo/seed", headers=auth_headers("admin"))
+    for quantity in (0, -1):
+        response = client.post(
+            "/api/v1/donations",
+            headers=auth_headers("donor"),
+            json={
+                "donor_name": "X",
+                "category": "vegetarian",
+                "total_portions": quantity,
+                "pickup_deadline": future_deadline,
+            },
+        )
+        assert response.status_code == 422
 
 
 def test_reject_past_deadline(client, auth_headers):
@@ -198,6 +269,54 @@ def test_ai_explain_fallback(client, auth_headers, future_deadline):
     assert r.status_code == 200
     assert r.json()["source"] == "fallback"
     assert r.json()["summary"]
+
+
+def test_ai_recovery_summary_empty_queue(client, auth_headers):
+    client.post("/api/v1/demo/seed", headers=auth_headers("admin"))
+    response = client.get(
+        "/api/v1/ai/recovery-summary", headers=auth_headers("admin")
+    )
+    assert response.status_code == 200
+    assert response.json()["source"] == "fallback"
+    assert "No donations currently need recovery" in response.json()["summary"]
+    assert response.json()["context"]["count"] == 0
+
+
+def test_ai_recovery_summary_with_decline_falls_back_with_context(
+    client, auth_headers, future_deadline
+):
+    client.post("/api/v1/demo/seed", headers=auth_headers("admin"))
+    created = client.post(
+        "/api/v1/donations",
+        headers=auth_headers("donor"),
+        json={
+            "donor_name": "Harbor Bistro",
+            "category": "vegetarian",
+            "total_portions": 120,
+            "pickup_deadline": future_deadline,
+            "is_demo": True,
+        },
+    ).json()
+    matches = client.get(
+        f"/api/v1/donations/{created['id']}/matches",
+        headers=auth_headers("admin"),
+    ).json()
+    offer = next(match for match in matches if match["status"] == "pending")
+    decline = client.post(
+        f"/api/v1/invitations/{offer['invitation_id']}/decline",
+        headers=auth_headers("recipient", recipient_id=offer["recipient_id"]),
+    )
+    assert decline.status_code == 200
+
+    response = client.get(
+        "/api/v1/ai/recovery-summary", headers=auth_headers("admin")
+    )
+    assert response.status_code == 200
+    assert response.json()["source"] == "fallback"
+    assert response.json()["context"]["count"] == 1
+    assert response.json()["context"]["donations_needing_recovery"][0][
+        "donation_id"
+    ] == created["id"]
 
 
 def test_timezone_naive_rejected(client, auth_headers):
