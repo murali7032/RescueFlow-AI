@@ -4,11 +4,13 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.db.models import (
     Allocation,
     Donation,
+    DonationReview,
     Invitation,
     Organization,
     Recipient,
@@ -29,6 +31,33 @@ def reset_demo_data(db: Session) -> None:
         r[0]
         for r in db.query(Recipient.id).filter(Recipient.is_demo.is_(True)).all()
     ]
+    demo_allocation_ids = [
+        r[0]
+        for r in db.query(Allocation.id)
+        .filter(
+            or_(
+                Allocation.donation_id.in_(demo_donation_ids)
+                if demo_donation_ids
+                else False,
+                Allocation.recipient_id.in_(demo_recipient_ids)
+                if demo_recipient_ids
+                else False,
+            )
+        )
+        .all()
+    ]
+
+    # Reviews reference allocations and donations. Remove reviews first, even
+    # when only the recipient side of a demo allocation is being reset.
+    review_filters = []
+    if demo_donation_ids:
+        review_filters.append(DonationReview.donation_id.in_(demo_donation_ids))
+    if demo_allocation_ids:
+        review_filters.append(DonationReview.allocation_id.in_(demo_allocation_ids))
+    if review_filters:
+        db.query(DonationReview).filter(or_(*review_filters)).delete(
+            synchronize_session=False
+        )
 
     if demo_donation_ids:
         db.query(Allocation).filter(

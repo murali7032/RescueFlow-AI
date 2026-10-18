@@ -28,7 +28,10 @@ def seed(
         logger.exception("Demo seed integrity error")
         raise HTTPException(
             status_code=409,
-            detail="Demo seed conflict (duplicate rows). Try Reset & reseed again after redeploy.",
+            detail=(
+                "Demo seed conflicted with existing database rows. "
+                "Deploy the latest backend and check its logs if it persists."
+            ),
         ) from exc
     except Exception as exc:
         db.rollback()
