@@ -1,5 +1,31 @@
 import React from "react";
 
+export function PageHeader({
+  title,
+  subtitle,
+  role,
+  actions,
+}: {
+  title: string;
+  subtitle?: string;
+  role?: string;
+  actions?: React.ReactNode;
+}) {
+  return (
+    <header className="page-header">
+      <div>
+        <h1>{title}</h1>
+        {subtitle ? <p className="muted">{subtitle}</p> : null}
+      </div>
+      <div className="topbar-right">
+        {role ? <span className="role-chip">{role}</span> : null}
+        {actions}
+      </div>
+    </header>
+  );
+}
+
+/** @deprecated Prefer PageHeader inside AppShell — kept for compatibility */
 export function Shell({
   title,
   subtitle,
@@ -14,22 +40,9 @@ export function Shell({
   actions?: React.ReactNode;
 }) {
   return (
-    <div className="app-shell">
-      <header className="topbar">
-        <div>
-          <p className="brand">RescueFlow AI</p>
-          <h1>{title}</h1>
-          {subtitle ? <p className="muted">{subtitle}</p> : null}
-        </div>
-        <div className="topbar-right">
-          <span className="role-chip">{role}</span>
-          {actions}
-        </div>
-      </header>
-      <main className="content">{children}</main>
-      <footer className="footer">
-        FoodBridge · Synthetic demo data is labelled · Allocated ≠ meals served
-      </footer>
+    <div className="page">
+      <PageHeader title={title} subtitle={subtitle} role={role} actions={actions} />
+      <div className="content">{children}</div>
     </div>
   );
 }
@@ -86,7 +99,15 @@ export function Banner({
   return <div className={`banner banner-${tone}`}>{children}</div>;
 }
 
-export function Stat({ label, value, hint }: { label: string; value: string | number; hint?: string }) {
+export function Stat({
+  label,
+  value,
+  hint,
+}: {
+  label: string;
+  value: string | number;
+  hint?: string;
+}) {
   return (
     <div className="stat">
       <span className="stat-label">{label}</span>
@@ -98,4 +119,12 @@ export function Stat({ label, value, hint }: { label: string; value: string | nu
 
 export function Empty({ children }: { children: React.ReactNode }) {
   return <div className="empty">{children}</div>;
+}
+
+export function Loading({ children = "Loading…" }: { children?: React.ReactNode }) {
+  return (
+    <div className="empty" role="status" aria-live="polite">
+      {children}
+    </div>
+  );
 }

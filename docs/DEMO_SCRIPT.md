@@ -1,6 +1,6 @@
 # Demo Script (3–4 minutes) — RescueFlow AI by FoodBridge
 
-**Prep (before stage):** start API (`uvicorn app.main:app --reload --port 8000`), seed from Admin → **Reset & reseed**, open Donor (:5173), Recipient (:5174), Admin (:5175).
+**Prep (before stage):** start API (`uvicorn app.main:app --reload --port 8000`), start UI (`cd frontend && npm run dev`), seed from Dashboard/Admin → **Seed demo** / **Reset & reseed**, then use sidebar: Donor → Recipient → Admin.
 
 ---
 

@@ -12,10 +12,7 @@ from functools import lru_cache
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-_LOCAL_CORS = (
-    "http://localhost:5173,http://localhost:5174,http://localhost:5175,"
-    "http://127.0.0.1:5173,http://127.0.0.1:5174,http://127.0.0.1:5175"
-)
+_LOCAL_CORS = "http://localhost:5173,http://127.0.0.1:5173"
 
 
 class Settings(BaseSettings):
@@ -98,10 +95,8 @@ class Settings(BaseSettings):
 
         if not self.cors_origin_list:
             errors.append(
-                "CORS_ORIGINS is required in production. Set Cloud Run UI "
-                "URLs, e.g. https://foodbridge-donor-ui-XXXX.a.run.app,"
-                "https://foodbridge-recipient-ui-XXXX.a.run.app,"
-                "https://foodbridge-admin-ui-XXXX.a.run.app "
+                "CORS_ORIGINS is required in production. Set the unified UI "
+                "Cloud Run URL, e.g. https://foodbridge-ui-XXXX.a.run.app "
                 "(or '*' for first boot only)."
             )
 

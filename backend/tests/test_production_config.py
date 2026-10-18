@@ -21,7 +21,7 @@ def test_production_ok_without_demo_mode_flag():
         environment="production",
         demo_mode=False,
         database_url="postgresql+psycopg2://u:p@/db?host=/cloudsql/x",
-        cors_origins="https://foodbridge-donor-ui-xxxx.a.run.app",
+        cors_origins="https://foodbridge-ui-xxxx.a.run.app",
         google_cloud_project="proj",
     )
     assert settings.validate_for_runtime() == []
@@ -32,10 +32,7 @@ def test_production_ok_with_cloud_run_ui_origins():
         environment="production",
         demo_mode=True,
         database_url="postgresql+psycopg2://u:p@/db?host=/cloudsql/x",
-        cors_origins=(
-            "https://foodbridge-donor-ui-xxxx.a.run.app,"
-            "https://foodbridge-admin-ui-xxxx.a.run.app"
-        ),
+        cors_origins="https://foodbridge-ui-xxxx.a.run.app",
         google_cloud_project="proj",
     )
     assert settings.validate_for_runtime() == []

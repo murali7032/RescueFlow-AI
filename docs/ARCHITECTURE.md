@@ -4,9 +4,10 @@
 
 ```mermaid
 flowchart LR
-  DonorUI[Donor Vite App] --> API[FastAPI Cloud Run]
-  RecipientUI[Recipient Vite App] --> API
-  AdminUI[Admin Vite App] --> API
+  WebUI[Unified Vite React App] --> API[FastAPI Cloud Run]
+  WebUI --> Donor[Donor Workspace]
+  WebUI --> Recipient[Recipient Workspace]
+  WebUI --> Admin[Admin Dashboard]
   API --> DB[(PostgreSQL / SQLite)]
   API --> Match[Deterministic Matching]
   API --> Alloc[Transactional Allocations]
@@ -49,7 +50,7 @@ Recovery = rematch remaining stock after declines/expiries without cancelling va
 
 ## Security boundaries
 
-- Identity from demo headers (`X-Demo-Role`) when `DEMO_MODE=true` (local and Cloud Run cup deploys).
+- Identity from demo headers (`X-Demo-Role`) on the unified web app (page role per workspace; optional DEV-only override).
 - Roles: donor, recipient, admin. Recipients cannot accept another kitchen’s invites.
 - AI tools are read-only; the model cannot allocate or write DB rows.
 

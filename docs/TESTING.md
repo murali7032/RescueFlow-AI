@@ -28,9 +28,7 @@ Without Postgres, the concurrency test is **skipped**.
 ## Frontend
 
 ```bash
-cd frontend/donor && npm install && npm test && npm run build
-cd ../recipient && npm install && npm test && npm run build
-cd ../admin && npm install && npm test && npm run build
+cd frontend && npm install && npm test && npm run build
 ```
 
 Component tests cover shell rendering, form presence, demo warnings. Full E2E browser automation is not bundled; use `deploy/smoke_test.sh` against a running API.

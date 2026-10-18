@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
-# Build all frontends against a Cloud Run API URL and deploy each to Cloud Run.
+# Build the unified frontend against a Cloud Run API URL and deploy to Cloud Run.
 #
 # Usage:
 #   export VITE_API_URL="https://foodbridge-rescueflow-XXXX.a.run.app"
 #   ./deploy/deploy_frontend.sh [--project ID] [--region REGION]
 #
 # Optional:
-#   VITE_AUTH_MODE=demo   (default — demo role headers; no Firebase)
+#   VITE_AUTH_MODE=demo   (default — demo role headers)
 set -euo pipefail
 
 REGION="${REGION:-asia-south1}"
+SERVICE="${SERVICE:-foodbridge-ui}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 FRONTEND_DIR="${ROOT_DIR}/frontend"
@@ -20,6 +21,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --project) PROJECT_ID="$2"; shift 2 ;;
     --region) REGION="$2"; shift 2 ;;
+    --service) SERVICE="$2"; shift 2 ;;
     *) echo "Unknown arg: $1"; exit 1 ;;
   esac
 done
@@ -27,16 +29,8 @@ done
 : "${VITE_API_URL:?Set VITE_API_URL to your Cloud Run API URL}"
 
 echo "=============================================="
-echo " RescueFlow frontend → Cloud Run (NOT Firebase)"
+echo " RescueFlow unified UI → Cloud Run"
 echo "=============================================="
-
-# Hard fail if an old Firebase Hosting layout is still present
-if [[ -f "${ROOT_DIR}/firebase.json" || -f "${ROOT_DIR}/.firebaserc" ]]; then
-  echo "ERROR: firebase.json / .firebaserc still present."
-  echo "This script no longer uses Firebase Hosting."
-  echo "Run: git pull origin main   (or delete those files) and re-run."
-  exit 1
-fi
 
 command -v gcloud >/dev/null || { echo "gcloud CLI required"; exit 1; }
 
@@ -48,6 +42,7 @@ fi
 
 echo "==> Project:       ${PROJECT_ID}"
 echo "==> Region:        ${REGION}"
+echo "==> Service:       ${SERVICE}"
 echo "==> VITE_API_URL:  ${VITE_API_URL}"
 echo "==> VITE_AUTH_MODE:${VITE_AUTH_MODE}"
 
@@ -67,59 +62,43 @@ if ! gcloud artifacts repositories describe "${AR_REPO}" \
     --description="FoodBridge / RescueFlow UI images"
 fi
 
-write_env() {
-  local app_dir="$1"
-  cat > "${app_dir}/.env.production" <<EOF
+cat > "${FRONTEND_DIR}/.env.production" <<EOF
 VITE_API_URL=${VITE_API_URL}
 VITE_AUTH_MODE=${VITE_AUTH_MODE}
 EOF
-}
 
-UI_URLS=()
+image="${REGION}-docker.pkg.dev/${PROJECT_ID}/${AR_REPO}/${SERVICE}:latest"
 
-for app in donor recipient admin; do
-  service="foodbridge-${app}-ui"
-  image="${REGION}-docker.pkg.dev/${PROJECT_ID}/${AR_REPO}/${service}:latest"
+echo "==> Cloud Build → ${image}"
+gcloud builds submit "${FRONTEND_DIR}" \
+  --project="${PROJECT_ID}" \
+  --config="${ROOT_DIR}/deploy/cloudbuild-frontend.yaml" \
+  --substitutions="_VITE_API_URL=${VITE_API_URL},_VITE_AUTH_MODE=${VITE_AUTH_MODE},_IMAGE=${image}"
 
-  echo "==> Building ${app} (.env.production)"
-  write_env "${FRONTEND_DIR}/${app}"
+echo "==> Deploying Cloud Run service ${SERVICE}"
+gcloud run deploy "${SERVICE}" \
+  --image="${image}" \
+  --region="${REGION}" \
+  --project="${PROJECT_ID}" \
+  --allow-unauthenticated \
+  --port=8080 \
+  --memory=256Mi \
+  --cpu=1 \
+  --min-instances=0 \
+  --max-instances=5 \
+  --quiet
 
-  echo "==> Cloud Build → ${image}"
-  gcloud builds submit "${FRONTEND_DIR}" \
-    --project="${PROJECT_ID}" \
-    --config="${ROOT_DIR}/deploy/cloudbuild-frontend.yaml" \
-    --substitutions="_APP=${app},_VITE_API_URL=${VITE_API_URL},_VITE_AUTH_MODE=${VITE_AUTH_MODE},_IMAGE=${image}"
-
-  echo "==> Deploying Cloud Run service ${service}"
-  gcloud run deploy "${service}" \
-    --image="${image}" \
-    --region="${REGION}" \
-    --project="${PROJECT_ID}" \
-    --allow-unauthenticated \
-    --port=8080 \
-    --memory=256Mi \
-    --cpu=1 \
-    --min-instances=0 \
-    --max-instances=5 \
-    --quiet
-
-  url="$(gcloud run services describe "${service}" \
-    --region="${REGION}" --project="${PROJECT_ID}" \
-    --format='value(status.url)')"
-  UI_URLS+=("${url}")
-  echo "==> ${app}: ${url}"
-done
-
-CORS_JOINED="$(IFS=,; echo "${UI_URLS[*]}")"
+UI_URL="$(gcloud run services describe "${SERVICE}" \
+  --region="${REGION}" --project="${PROJECT_ID}" \
+  --format='value(status.url)')"
 
 echo ""
-echo "==> All UIs deployed on Cloud Run."
-echo "Set API CORS to these origins and redeploy the backend:"
+echo "==> Frontend deployed: ${UI_URL}"
+echo "==> Backend API:       ${VITE_API_URL}"
 echo ""
-echo "  export CORS_ORIGINS='${CORS_JOINED}'"
-echo "  ./deploy/deploy.sh --cors-origins \"\$CORS_ORIGINS\" --cloudsql \"\${PROJECT_ID}:asia-south1:foodbridge-pg\""
+echo "Set API CORS to the UI origin and update the backend:"
 echo ""
-echo "Or update in place:"
+echo "  export CORS_ORIGINS='${UI_URL}'"
 echo "  gcloud run services update foodbridge-rescueflow \\"
 echo "    --region=${REGION} \\"
-echo "    --update-env-vars=\"CORS_ORIGINS=${CORS_JOINED}\""
+echo "    --update-env-vars=\"CORS_ORIGINS=${UI_URL}\""

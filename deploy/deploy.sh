@@ -2,7 +2,7 @@
 # Deploy RescueFlow AI backend to Cloud Run with Cloud SQL + Secret Manager.
 #
 # Usage:
-#   export CORS_ORIGINS="https://foodbridge-donor-ui-XXXX.a.run.app,https://foodbridge-recipient-ui-XXXX.a.run.app,https://foodbridge-admin-ui-XXXX.a.run.app"
+#   export CORS_ORIGINS="https://foodbridge-ui-XXXX.a.run.app"
 #   # Or temporarily: export CORS_ORIGINS="*"
 #   export CLOUDSQL_INSTANCE="PROJECT:asia-south1:foodbridge-pg"   # optional
 #   ./deploy/deploy.sh [--project ID] [--region REGION] [--service NAME]
@@ -43,7 +43,7 @@ CORS_ORIGINS="${CORS_ORIGINS:-}"
 if [[ -z "${CORS_ORIGINS}" ]]; then
   echo "ERROR: CORS_ORIGINS is required for production deploy."
   echo "Example (after frontends are deployed):"
-  echo "  export CORS_ORIGINS='https://foodbridge-donor-ui-XXXX.a.run.app,https://foodbridge-recipient-ui-XXXX.a.run.app,https://foodbridge-admin-ui-XXXX.a.run.app'"
+  echo "  export CORS_ORIGINS='https://foodbridge-ui-XXXX.a.run.app'"
   echo "Or for first boot before UI URLs exist:"
   echo "  export CORS_ORIGINS='*'"
   echo "  ./deploy/deploy.sh"
@@ -153,7 +153,7 @@ echo "==> Health:   ${URL}/health"
 echo ""
 echo "Next:"
 echo "  1. export VITE_API_URL=${URL}"
-echo "  2. ./deploy/deploy_frontend.sh   # deploys donor/recipient/admin to Cloud Run"
-echo "  3. Update CORS_ORIGINS to the three UI Cloud Run URLs, then redeploy backend"
+echo "  2. ./deploy/deploy_frontend.sh   # deploys unified foodbridge-ui to Cloud Run"
+echo "  3. Update CORS_ORIGINS to the foodbridge-ui URL, then update backend"
 echo "  4. ./deploy/smoke_test.sh ${URL}"
 echo "  5. After schema exists, keep AUTO_CREATE_TABLES=false"

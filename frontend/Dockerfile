@@ -1,29 +1,26 @@
-# Build any of the three Vite apps for Cloud Run (nginx on :8080).
-# Context must be the frontend/ directory.
+# Unified RescueFlow web UI for Cloud Run (nginx on :8080).
+# Build context: frontend/
 #
-#   docker build --build-arg APP=donor --build-arg VITE_API_URL=https://... -t donor-ui .
-ARG APP=donor
+#   docker build --build-arg VITE_API_URL=https://api.example.run.app -t foodbridge-ui .
 ARG VITE_API_URL=
 ARG VITE_AUTH_MODE=demo
 
 FROM node:20-alpine AS build
-ARG APP
 ARG VITE_API_URL
 ARG VITE_AUTH_MODE
 ENV VITE_API_URL=${VITE_API_URL} \
     VITE_AUTH_MODE=${VITE_AUTH_MODE}
 
 WORKDIR /build
+COPY package.json package-lock.json ./
 COPY shared ./shared
-COPY ${APP}/package.json ${APP}/package-lock.json ./${APP}/
-WORKDIR /build/${APP}
+COPY index.html vite.config.ts tsconfig.json ./
+COPY src ./src
 RUN npm ci
-COPY ${APP}/ ./
 RUN npm run build
 
 FROM nginx:1.27-alpine
 COPY nginx-spa.conf /etc/nginx/conf.d/default.conf
-ARG APP
-COPY --from=build /build/${APP}/dist /usr/share/nginx/html
+COPY --from=build /build/dist /usr/share/nginx/html
 EXPOSE 8080
 CMD ["nginx", "-g", "daemon off;"]

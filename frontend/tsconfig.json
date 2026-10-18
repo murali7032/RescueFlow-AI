@@ -12,10 +12,13 @@
     "noEmit": true,
     "jsx": "react-jsx",
     "strict": true,
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
     "baseUrl": ".",
     "paths": {
-      "@foodbridge/shared/*": ["../shared/*"]
+      "@foodbridge/shared/*": ["shared/*"],
+      "@/*": ["src/*"]
     }
   },
-  "include": ["src"]
+  "include": ["src", "shared"]
 }

@@ -36,8 +36,8 @@ Calling `https://8000-….cloudshell.dev` from `https://5173-….cloudshell.dev`
 # Terminal 1 — API on 8000 (keep Web Preview on the frontend port only)
 cd backend && uvicorn app.main:app --host 0.0.0.0 --port 8000
 
-# Terminal 2 — open Web Preview on 5173 / 5174 / 5175
-cd frontend/donor && npm run dev -- --host 0.0.0.0 --port 5173
+# Terminal 2 — open Web Preview on 5173
+cd frontend && npm run dev -- --host 0.0.0.0 --port 5173
 ```
 
 Restart Vite after pulling this change so the proxy loads.
