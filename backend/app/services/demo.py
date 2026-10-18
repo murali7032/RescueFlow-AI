@@ -8,7 +8,6 @@ from sqlalchemy.orm import Session
 
 from app.db.models import (
     Allocation,
-    AuditEvent,
     Donation,
     Invitation,
     Organization,
@@ -17,9 +16,11 @@ from app.db.models import (
 )
 from app.services.audit import record_event
 
+_DEMO_FIREBASE_UIDS = ("demo-donor", "demo-recipient-a", "demo-admin")
+
 
 def reset_demo_data(db: Session) -> None:
-    """Remove demo-tagged rows and related invitations/allocations."""
+    """Remove demo-tagged rows and related invitations/allocations/users."""
     demo_donation_ids = [
         r[0]
         for r in db.query(Donation.id).filter(Donation.is_demo.is_(True)).all()
@@ -47,9 +48,15 @@ def reset_demo_data(db: Session) -> None:
         db.query(Allocation).filter(
             Allocation.recipient_id.in_(demo_recipient_ids)
         ).delete(synchronize_session=False)
-        db.query(User).filter(User.recipient_id.in_(demo_recipient_ids)).delete(
-            synchronize_session=False
-        )
+
+    # Delete ALL demo users (donor/admin are not linked via recipient_id).
+    # Leaving them causes UniqueViolation on firebase_uid when re-seeding.
+    db.query(User).filter(
+        (User.firebase_uid.in_(_DEMO_FIREBASE_UIDS))
+        | (User.email.like("%@demo.foodbridge.local"))
+    ).delete(synchronize_session=False)
+
+    if demo_recipient_ids:
         db.query(Recipient).filter(Recipient.id.in_(demo_recipient_ids)).delete(
             synchronize_session=False
         )
@@ -72,6 +79,7 @@ def seed_demo(db: Session, *, force: bool = False) -> dict:
             "message": "Demo recipients already seeded",
             "count": existing,
             "reset": False,
+            "label": "SYNTHETIC DEMO DATA",
         }
 
     now = datetime.now(timezone.utc)
