@@ -32,15 +32,6 @@ interface RecoveryPayload {
   }>;
 }
 
-interface AuditEvent {
-  id: number;
-  action: string;
-  entity_type: string;
-  entity_id: string;
-  details: Record<string, unknown>;
-  created_at?: string;
-}
-
 interface DonorReview {
   id: number;
   donor_name: string;
@@ -56,7 +47,6 @@ export default function AdminDashboardPage() {
   const api = useApi("admin");
   const [dash, setDash] = useState<AdminDashboard | null>(null);
   const [recovery, setRecovery] = useState<RecoveryPayload | null>(null);
-  const [audit, setAudit] = useState<AuditEvent[]>([]);
   const [reviews, setReviews] = useState<DonorReview[]>([]);
   const [aiSummary, setAiSummary] = useState<string>("");
   const [aiSource, setAiSource] = useState<string>("");
@@ -71,15 +61,13 @@ export default function AdminDashboardPage() {
   async function loadAll() {
     setLoading(true);
     try {
-      const [d, r, a, reviews] = await Promise.all([
+      const [d, r, reviews] = await Promise.all([
         api.get<AdminDashboard>("/api/v1/admin/dashboard"),
         api.get<RecoveryPayload>("/api/v1/admin/recovery"),
-        api.get<AuditEvent[]>("/api/v1/admin/audit-events?limit=20"),
         api.get<DonorReview[]>("/api/v1/admin/donor-reviews?limit=20"),
       ]);
       setDash(d);
       setRecovery(r);
-      setAudit(a);
       setReviews(reviews);
       setMessage(null);
     } catch (e) {
@@ -146,18 +134,15 @@ export default function AdminDashboardPage() {
   async function loadAiSummary() {
     setBusy(true);
     setBusyAction("ai-summary");
+    setAiSummary("");
+    setAiSource("");
+    setMessage(null);
     try {
-      const result = await api.get<{ source: string; summary: string; context?: RecoveryPayload }>(
+      const result = await api.get<{ source: "gemini"; summary: string; context?: RecoveryPayload }>(
         "/api/v1/ai/recovery-summary"
       );
-      const raw = result.summary.replace(/```[\s\S]*?```/g, "").replace(/[`*_#]/g, "").trim();
-      const invalid = /recent_recovery_events|total_remaining_portions_at_risk|donations_needing_recovery|\b\d+\s*[+*]\s*\d+\s*=/i.test(raw);
-      const context = result.context ?? recovery;
-      const safeSummary = context
-        ? `${context.count} donation${context.count === 1 ? "" : "s"} need attention, with ${context.total_remaining_portions_at_risk} portions still available for recovery.${context.donations_needing_recovery?.length ? ` Start with ${context.donations_needing_recovery.slice(0, 2).map((d) => `donation #${d.donation_id} from ${d.donor_name} (${d.remaining_portions} portions)`).join(" and ")}.` : " There are no open donations to rematch right now."}`
-        : "The recovery summary is ready.";
-      setAiSummary(invalid || raw.length < 20 ? safeSummary : raw);
-      setAiSource(invalid || raw.length < 20 ? "recovery data" : result.source);
+      setAiSummary(result.summary.trim());
+      setAiSource("Gemini");
     } catch (err) {
       setMessage({
         tone: "error",
@@ -267,26 +252,6 @@ export default function AdminDashboardPage() {
                         Rematch now
                       </Button>
                     ) : null}
-                  </div>
-                ))}
-              </div>
-            )}
-          </Card>
-
-          <Card title="Recent audit events">
-            {audit.length === 0 ? (
-              <Empty>No audit events yet.</Empty>
-            ) : (
-              <div className="list">
-                {audit.map((e) => (
-                  <div key={e.id} className="list-item">
-                    <header>
-                      <strong>{e.action}</strong>
-                      <span className="badge">
-                        {e.entity_type}:{e.entity_id}
-                      </span>
-                    </header>
-                    <div className="muted">{e.created_at}</div>
                   </div>
                 ))}
               </div>

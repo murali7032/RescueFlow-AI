@@ -117,6 +117,8 @@ export default function DonorWorkspacePage() {
   async function explain() {
     if (selectedId == null) return;
     setBusy(true);
+    setExplanation(null);
+    setMessage(null);
     try {
       const result = await api.post<ExplainMatchResponse>("/api/v1/ai/explain-match", {
         donation_id: selectedId,
@@ -331,7 +333,7 @@ export default function DonorWorkspacePage() {
             </Card>
 
             {explanation ? (
-              <Card title={`Recovery explanation (${explanation.source})`} tone="accent">
+              <Card title="Recovery explanation (Gemini)" tone="accent">
                 <p>{explanation.summary}</p>
                 {explanation.suggested_actions?.length ? (
                   <ul>

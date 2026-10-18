@@ -97,7 +97,7 @@ export interface AdminDashboard {
 
 export interface ExplainMatchResponse {
   donation_id: number;
-  source: "gemini" | "fallback";
+  source: "gemini";
   summary: string;
   matches: MatchOffer[];
   suggested_actions: string[];

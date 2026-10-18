@@ -20,6 +20,11 @@ async def explain_match_endpoint(
     result = await explain_match(db, payload.donation_id)
     if result.get("summary") == "Donation not found.":
         raise HTTPException(404, "Donation not found")
+    if result.get("source") != "gemini":
+        raise HTTPException(
+            503,
+            "Gemini could not produce a valid explanation after one retry. Please try again.",
+        )
     return result
 
 
@@ -28,4 +33,10 @@ async def recovery_summary_endpoint(
     db: Session = Depends(get_db),
     user: AuthUser = Depends(require_roles("admin")),
 ):
-    return await explain_recovery(db)
+    result = await explain_recovery(db)
+    if result.get("source") != "gemini":
+        raise HTTPException(
+            503,
+            "Gemini could not produce a valid recovery summary after one retry. Please try again.",
+        )
+    return result

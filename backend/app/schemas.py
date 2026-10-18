@@ -49,7 +49,7 @@ class ExplainMatchRequest(BaseModel):
 
 class ExplainMatchResponse(BaseModel):
     donation_id: int
-    source: str  # gemini | fallback
+    source: str  # Gemini only; unavailable or invalid output returns HTTP 503
     summary: str
     matches: list[dict]
     suggested_actions: list[str]

@@ -26,7 +26,7 @@ Use only the supplied facts. Never invent a recipient, reason, quantity, deadlin
 
 For a donation explanation, state the current status and portions remaining; explain the top pending offer(s) with the score and the strongest supplied reasons (fit, capacity, collection timing, and estimated distance when present); explain what happens next and give one practical next step. For an admin recovery summary, state the number of affected donations and portions at risk, explain why the listed donations need attention, and clarify the next operational action. If there is no recovery work, say so clearly and explain that pending offers are still awaiting responses or no remaining stock needs a rematch, only when the facts support it.
 
-Return 3–5 complete sentences, normally 60–120 words. Use normal prose, not JSON, equations, fragments, or raw database fields. Do not show ISO timestamps or seconds; express dates and times in readable form if needed. Avoid repeating every fact when a shorter explanation is clearer. If information is missing, omit it rather than guessing."""
+Return 3–5 complete sentences, ideally 65–85 words and never more than 100 words. Use normal prose, not JSON, equations, fragments, or raw database fields. Do not show ISO timestamps or seconds; express dates and times in readable form if needed. Avoid repeating every fact when a shorter explanation is clearer. If information is missing, omit it rather than guessing."""
 
 
 def _format_time(value: str | None) -> str | None:
@@ -67,18 +67,44 @@ def _friendly_reasons(reasons: list[str]) -> list[str]:
     return friendly
 
 
-def _usable_explanation(text: str | None) -> str | None:
+def _usable_explanation(text: str | None) -> tuple[str | None, str | None]:
     if not text:
-        return None
+        return None, "Gemini returned an empty response"
     cleaned = " ".join(text.strip().split()).strip('"“”')
     words = cleaned.split()
-    if not 35 <= len(words) <= 160 or cleaned[-1:] not in ".!?":
-        logger.info(
-            "Gemini returned an incomplete or out-of-range explanation; "
-            "using deterministic copy"
-        )
+    if len(words) < 50:
+        return None, f"response was too short ({len(words)} words; minimum 50)"
+    if len(words) > 100:
+        return None, f"response was too long ({len(words)} words; maximum 100)"
+    if cleaned[-1:] not in ".!?":
+        return None, "response did not end with complete punctuation"
+    return cleaned, None
+
+
+async def _generate_explanation(prompt: str) -> str | None:
+    """Ask Gemini for a bounded answer, retrying once if its draft misses limits."""
+    draft = await _call_gemini(prompt)
+    accepted, reason = _usable_explanation(draft)
+    if accepted:
+        return accepted
+    if draft is None:
         return None
-    return cleaned
+
+    logger.info("Gemini explanation needs a rewrite: %s", reason)
+    retry_prompt = (
+        f"{prompt}\n\n"
+        "Rewrite your previous answer using only the facts above. Return 3–5 "
+        "complete sentences and 65–85 words (hard maximum: 100 words). Give "
+        "the explanation directly, with no heading, bullets, equations, or "
+        "preamble, and end with normal punctuation.\n"
+        f"Previous draft to correct:\n{draft}"
+    )
+    retry = await _call_gemini(retry_prompt)
+    accepted, reason = _usable_explanation(retry)
+    if accepted:
+        return accepted
+    logger.warning("Gemini explanation failed validation after retry: %s", reason)
+    return None
 
 
 def _fallback_explain(snapshot: dict, db: Session) -> dict[str, Any]:
@@ -175,7 +201,7 @@ async def _call_gemini(prompt: str) -> str | None:
                 config=types.GenerateContentConfig(
                     system_instruction=_SYSTEM_INSTRUCTION,
                     temperature=0.2,
-                    max_output_tokens=320,
+                    max_output_tokens=180,
                 ),
             )
             return (response.text or "").strip()
@@ -211,7 +237,7 @@ async def explain_match(db: Session, donation_id: int) -> dict[str, Any]:
         + json.dumps(snapshot, ensure_ascii=False, default=str)
     )
 
-    text = _usable_explanation(await _call_gemini(prompt))
+    text = await _generate_explanation(prompt)
     if text:
         return {
             "donation_id": donation_id,
@@ -277,7 +303,7 @@ async def explain_recovery(db: Session) -> dict[str, Any]:
         "to do next. If the queue is empty, explain that clearly.\nFACTS (JSON):\n"
         + json.dumps(facts, ensure_ascii=False, default=str)
     )
-    text = _usable_explanation(await _call_gemini(prompt))
+    text = await _generate_explanation(prompt)
     return {
         "source": "gemini" if text else "fallback",
         "summary": text or fallback_summary,
