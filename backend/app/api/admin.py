@@ -59,7 +59,7 @@ def dashboard(
 
     deadline_ok = (
         db.query(func.count(Donation.id))
-        .filter(Donation.status.in_(["allocated", "partially_allocated", "open"]))
+        .filter(Donation.status.in_(["allocated", "partially_allocated", "open", "invited", "no_match", "matching"]))
         .scalar()
         or 0
     )

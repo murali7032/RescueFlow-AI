@@ -18,7 +18,7 @@ def donations_needing_recovery(db: Session) -> list[dict]:
     donations = (
         db.query(Donation)
         .filter(
-            Donation.status.in_(["open", "partially_allocated"]),
+            Donation.status.in_(["open", "invited", "no_match", "partially_allocated"]),
             Donation.remaining_portions > 0,
         )
         .all()

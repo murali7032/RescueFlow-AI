@@ -96,7 +96,7 @@ def is_eligible(
     now = now or datetime.now(timezone.utc)
     deadline = as_utc(donation.pickup_deadline)
 
-    if donation.status not in {"open", "partially_allocated"}:
+    if donation.status not in {"open", "invited", "no_match", "partially_allocated"}:
         return False, f"Donation status is {donation.status}"
     if donation.remaining_portions <= 0:
         return False, "No remaining portions"
@@ -166,6 +166,11 @@ def create_invitations(db: Session, donation: Donation) -> list[Invitation]:
     """
     Rebalance pending invitations against current remaining stock.
 
+    Lifecycle states set here (per diagram):
+    - MATCHING  — entered while the algorithm is running
+    - INVITED   — set when >= 1 pending invitation exists after matching
+    - NO_MATCH  — set when 0 eligible recipients are found
+
     Policy:
     - Suggested quantities across pending offers never exceed remaining stock.
     - Offers are suggestions, not reservations.
@@ -174,13 +179,18 @@ def create_invitations(db: Session, donation: Donation) -> list[Invitation]:
     """
     now = datetime.now(timezone.utc)
 
-    if donation.status not in {"open", "partially_allocated"}:
+    if donation.status not in {"open", "partially_allocated", "no_match", "invited"}:
         return []
     if donation.remaining_portions <= 0:
         return []
     if as_utc(donation.pickup_deadline) <= now:
         donation.status = "expired"
         return []
+
+    # Diagram: enter MATCHING while the algorithm runs
+    prev_status = donation.status
+    donation.status = "matching"
+    db.flush()
 
     invitations = (
         db.query(Invitation).filter(Invitation.donation_id == donation.id).all()
@@ -233,6 +243,13 @@ def create_invitations(db: Session, donation: Donation) -> list[Invitation]:
         if invitation.recipient_id not in assigned_recipient_ids:
             invitation.status = "cancelled"
 
+    # Diagram: MATCHING → INVITED (eligible found) or NO_MATCH (none eligible)
+    pending_count = len(assigned_recipient_ids)
+    if pending_count > 0:
+        donation.status = "invited"
+    else:
+        donation.status = "no_match"
+
     record_event(
         db,
         entity_type="donation",
@@ -242,6 +259,8 @@ def create_invitations(db: Session, donation: Donation) -> list[Invitation]:
             "remaining_portions": donation.remaining_portions,
             "created": len(created),
             "assigned_recipients": list(assigned_recipient_ids),
+            "prev_status": prev_status,
+            "new_status": donation.status,
         },
     )
     db.flush()

@@ -69,7 +69,7 @@ def accept_invitation(
                 status_code=404, detail="Donation or recipient not found"
             )
 
-        if donation.status not in {"open", "partially_allocated"}:
+        if donation.status not in {"open", "invited", "partially_allocated"}:
             raise HTTPException(
                 status_code=409, detail="Donation is no longer open for allocation"
             )
@@ -269,6 +269,28 @@ def update_pickup_status(
         actor_id=actor_id,
         details={"pickup_status": new_status},
     )
+
+    # Diagram: ALLOCATED → COMPLETED when all allocations have pickup completed
+    if new_status == "completed":
+        donation = db.get(Donation, allocation.donation_id)
+        if donation is not None and donation.status == "allocated":
+            all_allocs = (
+                db.query(Allocation)
+                .filter(Allocation.donation_id == donation.id)
+                .all()
+            )
+            if all(a.pickup_status == "completed" for a in all_allocs):
+                donation.status = "completed"
+                record_event(
+                    db,
+                    entity_type="donation",
+                    entity_id=donation.id,
+                    action="donation_completed",
+                    actor_role=actor_role,
+                    actor_id=actor_id,
+                    details={"total_allocations": len(all_allocs)},
+                )
+
     db.commit()
     db.refresh(allocation)
     return allocation

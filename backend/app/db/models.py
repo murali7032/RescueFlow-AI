@@ -66,7 +66,7 @@ class Donation(Base):
     pickup_deadline: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     pickup_address: Mapped[str] = mapped_column(String(255), default="Demo kitchen")
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
-    # open | partially_allocated | allocated | expired | cancelled
+    # open | matching | invited | no_match | partially_allocated | allocated | completed | expired | cancelled
     status: Mapped[str] = mapped_column(String(30), default="open")
     is_demo: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)

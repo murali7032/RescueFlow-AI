@@ -134,3 +134,57 @@ def get_matches(
         .all()
     )
     return explain_matches(donation, invitations)
+
+
+# Diagram: OPEN → CANCELLED (donor cancels)
+_CANCELLABLE = {"open", "invited", "matching", "no_match", "partially_allocated"}
+
+
+@router.post("/{donation_id}/cancel")
+def cancel_donation(
+    donation_id: int,
+    db: Session = Depends(get_db),
+    user: AuthUser = Depends(require_roles("donor", "admin")),
+):
+    donation = db.get(Donation, donation_id)
+    if donation is None:
+        raise HTTPException(404, "Donation not found")
+    if (
+        user.role == "donor"
+        and user.organization_id
+        and donation.organization_id
+        and donation.organization_id != user.organization_id
+    ):
+        raise HTTPException(403, "Not authorized for this donation")
+    if donation.status not in _CANCELLABLE:
+        raise HTTPException(
+            409, f"Cannot cancel donation in status '{donation.status}'"
+        )
+
+    donation.status = "cancelled"
+
+    # Cancel all pending invitations for this donation
+    cancelled_count = (
+        db.query(Invitation)
+        .filter(
+            Invitation.donation_id == donation_id,
+            Invitation.status == "pending",
+        )
+        .update({"status": "cancelled"}, synchronize_session=False)
+    )
+
+    record_event(
+        db,
+        entity_type="donation",
+        entity_id=donation.id,
+        action="donation_cancelled",
+        actor_role=user.role,
+        actor_id=user.uid,
+        details={"cancelled_invitations": cancelled_count},
+    )
+    db.commit()
+    db.refresh(donation)
+    return {
+        **_serialize(donation),
+        "cancelled_invitations": cancelled_count,
+    }
