@@ -26,7 +26,7 @@ Use only the supplied facts. Never invent a recipient, reason, quantity, deadlin
 
 For a donation explanation, state the current status and portions remaining; explain the top pending offer(s) with the score and the strongest supplied reasons (fit, capacity, collection timing, and estimated distance when present); explain what happens next and give one practical next step. For an admin recovery summary, state the number of affected donations and portions at risk, explain why the listed donations need attention, and clarify the next operational action. If there is no recovery work, say so clearly and explain that pending offers are still awaiting responses or no remaining stock needs a rematch, only when the facts support it.
 
-Return 3–5 complete sentences, ideally 65–85 words and never more than 100 words. Use normal prose, not JSON, equations, fragments, or raw database fields. Do not show ISO timestamps or seconds; express dates and times in readable form if needed. Avoid repeating every fact when a shorter explanation is clearer. If information is missing, omit it rather than guessing."""
+Return 2–4 complete sentences, usually 35–65 words and never more than 100 words. A concise answer is better than filler; include only facts that help the reader understand the current status, strongest reason, or next step. Use normal prose, not JSON, equations, fragments, or raw database fields. Do not show ISO timestamps or seconds; express dates and times in readable form if needed. If information is missing, omit it rather than guessing."""
 
 
 def _format_time(value: str | None) -> str | None:
@@ -72,8 +72,8 @@ def _usable_explanation(text: str | None) -> tuple[str | None, str | None]:
         return None, "Gemini returned an empty response"
     cleaned = " ".join(text.strip().split()).strip('"“”')
     words = cleaned.split()
-    if len(words) < 50:
-        return None, f"response was too short ({len(words)} words; minimum 50)"
+    if len(words) < 25:
+        return None, f"response was too short ({len(words)} words; minimum 25)"
     if len(words) > 100:
         return None, f"response was too long ({len(words)} words; maximum 100)"
     if cleaned[-1:] not in ".!?":
@@ -93,11 +93,13 @@ async def _generate_explanation(prompt: str) -> str | None:
     logger.info("Gemini explanation needs a rewrite: %s", reason)
     retry_prompt = (
         f"{prompt}\n\n"
-        "Rewrite your previous answer using only the facts above. Return 3–5 "
-        "complete sentences and 65–85 words (hard maximum: 100 words). Give "
-        "the explanation directly, with no heading, bullets, equations, or "
-        "preamble, and end with normal punctuation.\n"
-        f"Previous draft to correct:\n{draft}"
+        f"Your previous attempt was rejected: {reason}. Give a clear rewrite in "
+        "exactly 3 complete sentences, 30–70 words total. Sentence 1 states the "
+        "current status and quantity or recovery scope. Sentence 2 gives the "
+        "strongest concrete reason from the supplied facts. Sentence 3 states "
+        "what happens next and one practical action. Use only the supplied facts. "
+        "Do not use a heading, bullets, an introduction, or filler; end with "
+        "normal punctuation."
     )
     retry = await _call_gemini(retry_prompt)
     accepted, reason = _usable_explanation(retry)
