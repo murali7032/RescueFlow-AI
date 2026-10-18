@@ -20,7 +20,7 @@ def test_create_donation_and_matches(client, auth_headers, seed_recipients, futu
 def test_demo_seed_and_donation_flow(client, auth_headers, future_deadline):
     seed = client.post("/api/v1/demo/seed", headers=auth_headers("admin"))
     assert seed.status_code == 200
-    assert seed.json()["count"] == 4
+    assert seed.json()["count"] == 8
 
     create = client.post(
         "/api/v1/donations",
