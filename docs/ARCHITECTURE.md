@@ -13,8 +13,7 @@ flowchart LR
   API --> Alloc[Transactional Allocations]
   API --> Recovery[Recovery Rematch]
   API --> Agent[Gemini Explanation Agent]
-  Agent -->|fallback| LocalExplain[Deterministic Summary]
-  Agent -->|optional| Vertex[Vertex AI Gemini]
+  Agent -->Vertex[Vertex AI Gemini]
   Scheduler[Cloud Scheduler] -->|every minute| TimeoutJob[Cloud Run timeout job]
   TimeoutJob --> DB
   TimeoutJob --> Match
