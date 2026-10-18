@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.db.models import (
     Allocation,
+    AuditEvent,
     Donation,
     DonationReview,
     Invitation,
@@ -22,7 +23,7 @@ _DEMO_FIREBASE_UIDS = ("demo-donor", "demo-recipient-a", "demo-admin")
 
 
 def reset_demo_data(db: Session) -> None:
-    """Remove demo-tagged rows and related invitations/allocations/users."""
+    """Remove demo-tagged rows and audit history tied to those rows."""
     demo_donation_ids = [
         r[0]
         for r in db.query(Donation.id).filter(Donation.is_demo.is_(True)).all()
@@ -46,6 +47,48 @@ def reset_demo_data(db: Session) -> None:
         )
         .all()
     ]
+    demo_invitation_ids = [
+        r[0]
+        for r in db.query(Invitation.id)
+        .filter(
+            or_(
+                Invitation.donation_id.in_(demo_donation_ids)
+                if demo_donation_ids
+                else False,
+                Invitation.recipient_id.in_(demo_recipient_ids)
+                if demo_recipient_ids
+                else False,
+            )
+        )
+        .all()
+    ]
+
+    # Audit events have polymorphic entity references rather than foreign keys.
+    # Remove only events attached to demo donations, allocations, invitations,
+    # plus the marker emitted when this synthetic dataset was seeded.
+    audit_filters = [
+        (AuditEvent.entity_type == "system")
+        & (AuditEvent.entity_id == "demo")
+        & (AuditEvent.action == "demo_seeded")
+    ]
+    if demo_donation_ids:
+        audit_filters.append(
+            (AuditEvent.entity_type == "donation")
+            & AuditEvent.entity_id.in_([str(i) for i in demo_donation_ids])
+        )
+    if demo_allocation_ids:
+        audit_filters.append(
+            (AuditEvent.entity_type == "allocation")
+            & AuditEvent.entity_id.in_([str(i) for i in demo_allocation_ids])
+        )
+    if demo_invitation_ids:
+        audit_filters.append(
+            (AuditEvent.entity_type == "invitation")
+            & AuditEvent.entity_id.in_([str(i) for i in demo_invitation_ids])
+        )
+    db.query(AuditEvent).filter(or_(*audit_filters)).delete(
+        synchronize_session=False
+    )
 
     # Reviews reference allocations and donations. Remove reviews first, even
     # when only the recipient side of a demo allocation is being reset.
