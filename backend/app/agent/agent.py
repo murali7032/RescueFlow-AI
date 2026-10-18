@@ -26,7 +26,7 @@ Use only the supplied facts. Never invent a recipient, reason, quantity, deadlin
 
 For a donation explanation, state the current status and portions remaining; explain the top pending offer(s) with the score and the strongest supplied reasons (fit, capacity, collection timing, and estimated distance when present); explain what happens next and give one practical next step. For an admin recovery summary, state the number of affected donations and portions at risk, explain why the listed donations need attention, and clarify the next operational action. If there is no recovery work, say so clearly and explain that pending offers are still awaiting responses or no remaining stock needs a rematch, only when the facts support it.
 
-Return 2–4 complete sentences, usually 35–65 words and never more than 100 words. A concise answer is better than filler; include only facts that help the reader understand the current status, strongest reason, or next step. Use normal prose, not JSON, equations, fragments, or raw database fields. Do not show ISO timestamps or seconds; express dates and times in readable form if needed. If information is missing, omit it rather than guessing."""
+Explain clearly using only the supplied facts. Include the current status, the most relevant reasons, and the next step when those facts are available. Choose the amount of detail that best helps the reader; there is no required word count, sentence count, or response length. Do not invent missing facts. Distinguish an invitation, an allocation, and a confirmed/completed pickup. Do not show raw database fields or ISO timestamps; express dates and times in readable form if needed."""
 
 
 def _format_time(value: str | None) -> str | None:
@@ -68,16 +68,11 @@ def _friendly_reasons(reasons: list[str]) -> list[str]:
 
 
 def _usable_explanation(text: str | None) -> tuple[str | None, str | None]:
-    if not text:
+    if not text or not text.strip():
         return None, "Gemini returned an empty response"
     cleaned = " ".join(text.strip().split()).strip('"“”')
-    words = cleaned.split()
-    if len(words) < 25:
-        return None, f"response was too short ({len(words)} words; minimum 25)"
-    if len(words) > 100:
-        return None, f"response was too long ({len(words)} words; maximum 100)"
-    if cleaned[-1:] not in ".!?":
-        return None, "response did not end with complete punctuation"
+    if not cleaned:
+        return None, "Gemini returned an empty response"
     return cleaned, None
 
 
@@ -87,19 +82,13 @@ async def _generate_explanation(prompt: str) -> str | None:
     accepted, reason = _usable_explanation(draft)
     if accepted:
         return accepted
-    if draft is None:
-        return None
-
     logger.info("Gemini explanation needs a rewrite: %s", reason)
     retry_prompt = (
         f"{prompt}\n\n"
-        f"Your previous attempt was rejected: {reason}. Give a clear rewrite in "
-        "exactly 3 complete sentences, 30–70 words total. Sentence 1 states the "
-        "current status and quantity or recovery scope. Sentence 2 gives the "
-        "strongest concrete reason from the supplied facts. Sentence 3 states "
-        "what happens next and one practical action. Use only the supplied facts. "
-        "Do not use a heading, bullets, an introduction, or filler; end with "
-        "normal punctuation."
+        f"Your previous attempt returned no usable text ({reason}). Please answer "
+        "the request directly using the supplied facts. Do not invent missing "
+        "information. Choose a natural amount of detail; there is no required "
+        "word count, sentence count, or response length."
     )
     retry = await _call_gemini(retry_prompt)
     accepted, reason = _usable_explanation(retry)
@@ -203,7 +192,6 @@ async def _call_gemini(prompt: str) -> str | None:
                 config=types.GenerateContentConfig(
                     system_instruction=_SYSTEM_INSTRUCTION,
                     temperature=0.2,
-                    max_output_tokens=180,
                 ),
             )
             return (response.text or "").strip()
