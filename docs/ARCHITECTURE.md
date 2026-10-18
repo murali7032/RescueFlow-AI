@@ -15,14 +15,18 @@ flowchart LR
   API --> Agent[Gemini Explanation Agent]
   Agent -->|fallback| LocalExplain[Deterministic Summary]
   Agent -->|optional| Vertex[Vertex AI Gemini]
+  Scheduler[Cloud Scheduler] -->|every minute| TimeoutJob[Cloud Run timeout job]
+  TimeoutJob --> DB
+  TimeoutJob --> Match
 ```
 
 ## Request flows
 
 1. **Create donation** → validate deadline/quantity → persist `Donation` → `create_invitations` ranks eligible recipients → audit event.
 2. **Decline invitation** → mark declined (no stock change) → rematch remaining stock → audit.
-3. **Accept invitation** → row locks (Postgres) → allocate `min(suggested, remaining, capacity)` → update donation status → cancel pending only if remaining=0, else rebalance offers → allocation with `pickup_status=pending`.
-4. **Confirm pickup** → separate state transition on allocation; does not change donation ledger.
+3. **Timeout** → scheduled Cloud Run Job locks due invitation/donation rows → expire timed-out offers → if pickup deadline is still open, exclude that recipient and rematch; otherwise expire pending offers and donation.
+4. **Accept invitation** → row locks (Postgres) → reject expired offers → allocate `min(suggested, remaining, capacity)` → update donation status → cancel pending only if remaining=0, else rebalance offers → allocation with `pickup_status=pending`.
+5. **Confirm pickup** → separate state transition on allocation; does not change donation ledger.
 
 ## State machines
 
@@ -33,6 +37,8 @@ also: `expired`, `cancelled`
 ### Invitation
 `pending` → `accepted` | `declined` | `cancelled` | `expired`
 
+New invitations expire at the earlier of `created_at + INVITATION_RESPONSE_TIMEOUT_MINUTES` (default 15) and the donation pickup deadline. Expired recipients are not automatically re-invited.
+
 ### Pickup (on Allocation)
 `pending` → `confirmed` → `completed` (or `failed`)
 
@@ -42,11 +48,11 @@ Hard filters before scoring: donation open/partial, remaining > 0, recipient act
 
 Score weights (configurable): deadline 35%, capacity 30%, distance 20%, preference 15%. Distance is **synthetic demo data**, not live traffic.
 
-Recovery = rematch remaining stock after declines/expiries without cancelling valid pending offers after partial accepts.
+Recovery = rematch remaining stock after declines/timeouts without cancelling valid pending offers after partial accepts. Cloud Scheduler runs the one-shot timeout worker every minute; each donation is processed in its own transaction. The worker uses row locks and can safely be retried.
 
 ## Concurrency
 
-`accept_invitation` uses `SELECT … FOR UPDATE` on invitation, donation, and recipient. Verified concurrency tests require PostgreSQL (`CONCURRENCY_DATABASE_URL`). SQLite is for local/demo only.
+Accept, decline, manual recovery, and the timeout worker lock the donation before its invitations (then recipient for acceptance) to maintain a consistent lock order. Verified concurrency tests require PostgreSQL (`CONCURRENCY_DATABASE_URL`). SQLite is for local/demo only.
 
 ## Security boundaries
 

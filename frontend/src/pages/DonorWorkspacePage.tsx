@@ -14,6 +14,7 @@ import type {
   ExplainMatchResponse,
   MatchOffer,
 } from "@foodbridge/shared/types";
+import { formatDateTime, formatMatchReason } from "@foodbridge/shared/format";
 import { useApi } from "../hooks/useApi";
 
 function defaultDeadline(): string {
@@ -34,9 +35,11 @@ export default function DonorWorkspacePage() {
   } | null>(null);
   const [loadingList, setLoadingList] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [locating, setLocating] = useState(false);
 
   const [form, setForm] = useState({
     donor_name: "Harbor Bistro",
+    donor_type: "restaurant" as "restaurant" | "business" | "individual",
     category: "vegetarian",
     food_name: "Vegetarian thali",
     total_portions: 120,
@@ -129,6 +132,26 @@ export default function DonorWorkspacePage() {
     }
   }
 
+  function useCurrentLocation() {
+    if (!navigator.geolocation) {
+      setMessage({ tone: "error", text: "Location is not available in this browser." });
+      return;
+    }
+    setLocating(true);
+    navigator.geolocation.getCurrentPosition(
+      ({ coords }) => {
+        setForm((current) => ({ ...current, pickup_address: `${coords.latitude.toFixed(5)}, ${coords.longitude.toFixed(5)}` }));
+        setMessage({ tone: "info", text: "Pickup coordinates added. You can edit the address before publishing." });
+        setLocating(false);
+      },
+      () => {
+        setMessage({ tone: "error", text: "Could not get your location. Allow location access or enter the address manually." });
+        setLocating(false);
+      },
+      { enableHighAccuracy: true, timeout: 10000 },
+    );
+  }
+
   const selected = donations.find((d) => d.id === selectedId) ?? null;
 
   return (
@@ -137,6 +160,16 @@ export default function DonorWorkspacePage() {
         title="Donor workspace"
         subtitle="Publish surplus food, review ranked recovery offers, track remaining portions."
         role="Donor"
+        actions={
+          <label className="donor-type-select" style={{ margin: 0 }}>
+            Donor type
+            <select value={form.donor_type} onChange={(e) => setForm({ ...form, donor_type: e.target.value as typeof form.donor_type })}>
+              <option value="restaurant">Restaurant</option>
+              <option value="business">Company / business</option>
+              <option value="individual">Individual donor</option>
+            </select>
+          </label>
+        }
       />
 
       <div className="content">
@@ -146,7 +179,7 @@ export default function DonorWorkspacePage() {
           <Card title="Create surplus donation" tone="accent">
             <form onSubmit={onSubmit}>
               <label>
-                Business name
+                {form.donor_type === "individual" ? "Donor name" : form.donor_type === "business" ? "Company / business name" : "Restaurant name"}
                 <input
                   value={form.donor_name}
                   onChange={(e) => setForm({ ...form, donor_name: e.target.value })}
@@ -195,10 +228,10 @@ export default function DonorWorkspacePage() {
               </label>
               <label>
                 Pickup address
-                <input
-                  value={form.pickup_address}
-                  onChange={(e) => setForm({ ...form, pickup_address: e.target.value })}
-                />
+                <div className="address-field">
+                  <input value={form.pickup_address} onChange={(e) => setForm({ ...form, pickup_address: e.target.value })} />
+                  <Button variant="secondary" className="address-locate" onClick={useCurrentLocation} loading={locating}>Use my location</Button>
+                </div>
               </label>
               <label>
                 Notes
@@ -207,8 +240,8 @@ export default function DonorWorkspacePage() {
                   onChange={(e) => setForm({ ...form, notes: e.target.value })}
                 />
               </label>
-              <Button type="submit" disabled={busy}>
-                {busy ? "Saving…" : "Publish & match"}
+              <Button type="submit" loading={busy}>
+                Publish & match
               </Button>
             </form>
           </Card>
@@ -256,8 +289,9 @@ export default function DonorWorkspacePage() {
                 <Stat label="Status" value={selected.status} />
                 <Stat
                   label="Deadline"
-                  value={new Date(selected.pickup_deadline).toLocaleString()}
+                  value={formatDateTime(selected.pickup_deadline)}
                 />
+                <Stat label="Donor trust score" value={`${selected.donor_score ?? 50}/100`} hint={`${selected.donor_review_count ?? 0} recipient reviews`} />
               </div>
             </Card>
 
@@ -270,7 +304,7 @@ export default function DonorWorkspacePage() {
                 >
                   Refresh matches
                 </Button>
-                <Button variant="ghost" onClick={explain} disabled={busy}>
+                <Button variant="ghost" onClick={explain} loading={busy}>
                   AI explanation
                 </Button>
               </div>
@@ -282,13 +316,13 @@ export default function DonorWorkspacePage() {
                     <div key={m.invitation_id} className="list-item">
                       <header>
                         <strong>
-                          Recipient #{m.recipient_id} · score {m.score}
+                          {m.recipient_name ?? `Recipient #${m.recipient_id}`} · match score {m.score}/100
                         </strong>
                         <span className="badge">{m.status}</span>
                       </header>
                       <div>Suggested offer: {m.suggested_portions} portions</div>
                       {m.reasons?.length ? (
-                        <p className="muted">{m.reasons.join(" · ")}</p>
+                        <p className="muted">{m.reasons.map(formatMatchReason).join(" · ")}</p>
                       ) : null}
                     </div>
                   ))}

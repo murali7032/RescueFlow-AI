@@ -76,7 +76,12 @@ def donations_needing_recovery(db: Session) -> list[dict]:
 
 
 def run_recovery(db: Session, donation_id: int) -> dict:
-    donation = db.get(Donation, donation_id)
+    donation = (
+        db.query(Donation)
+        .filter(Donation.id == donation_id)
+        .with_for_update()
+        .first()
+    )
     if donation is None:
         return {"error": "Donation not found"}
 

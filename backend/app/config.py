@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 
-from pydantic import field_validator
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _LOCAL_CORS = "http://localhost:5173,http://127.0.0.1:5173"
@@ -39,9 +39,10 @@ class Settings(BaseSettings):
     google_cloud_project: str | None = None
     google_cloud_location: str = "asia-south1"
     google_genai_use_vertexai: bool = True
-    gemini_model: str = "gemini-2.0-flash"
+    gemini_model: str = "gemini-3.5-flash"
     ai_timeout_seconds: float = 12.0
     ai_enabled: bool = True
+    invitation_response_timeout_minutes: int = Field(default=15, ge=1, le=1440)
 
     # Matching weights
     weight_deadline: float = 0.35

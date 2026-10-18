@@ -319,7 +319,64 @@ textarea {
   font: inherit;
   font-weight: 600;
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.55rem;
+  transition: transform 140ms ease, box-shadow 140ms ease, background 140ms ease;
 }
+
+.btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 5px 14px rgba(21, 32, 24, 0.12);
+}
+
+.button-spinner {
+  display: inline-block;
+  width: 0.95rem;
+  height: 0.95rem;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: button-spin 700ms linear infinite;
+}
+
+@keyframes button-spin {
+  to { transform: rotate(360deg); }
+}
+
+.address-field { position: relative; }
+.address-field input { padding-right: 8.5rem; }
+.address-locate {
+  position: absolute;
+  right: 0.4rem;
+  bottom: 0.42rem;
+  padding: 0.38rem 0.65rem;
+  font-size: 0.78rem;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: rgba(12, 27, 19, 0.48);
+}
+.review-modal {
+  width: min(100%, 460px);
+  padding: 1.4rem;
+  border-radius: 20px;
+  background: var(--surface);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.22);
+}
+.review-stars { display: flex; gap: 0.25rem; margin: 0.9rem 0; }
+.review-star { border: 0; background: transparent; color: #d2d9d2; font-size: 2rem; cursor: pointer; }
+.review-star.selected { color: #d58a00; }
+.ai-summary { display: grid; gap: 0.65rem; }
+.ai-summary p { margin: 0; line-height: 1.65; }
+.donor-type-select { min-width: 190px; }
 
 .btn:disabled {
   opacity: 0.55;
@@ -464,4 +521,7 @@ textarea {
   .sidebar-nav {
     grid-template-columns: 1fr;
   }
+
+  .address-field input { padding-right: 0.8rem; }
+  .address-locate { position: static; margin-top: 0.4rem; }
 }

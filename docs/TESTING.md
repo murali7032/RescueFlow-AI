@@ -12,6 +12,7 @@
 | Invitation lifecycle | Accept; partial accept; full accept; decline; rematch; duplicate response; cancelled invitation response | Accept reduces stock/capacity exactly once; decline leaves stock unchanged and rematches others; invalid repeat responses return 409. | Automated service/API |
 | Allocation and pickup | Partial/full allocation; confirm pickup; complete pickup | Allocated portions remain separate from confirmed/completed pickup metrics. | Allocation invariants automated; confirm/complete manual |
 | Recovery and admin | Empty recovery queue; declined donation in queue; manual rematch; dashboard counts; audit trail | Only donations needing recovery appear in the queue; dashboard and audit reflect persisted events. | Empty/declined summaries and dashboard automated; rematch/audit manual |
+| Invitation timeout job | Response timeout expires only due offers and rematches; pickup deadline expires all pending offers and the donation; rerunning is idempotent; late accept is rejected | Timed-out recipients are not re-invited, remaining portions are unchanged until accepted, and no matching occurs after the pickup deadline. | Automated service tests in `test_timeouts.py`; scheduled Cloud Run Job manual smoke test |
 | AI explanation | Gemini success; missing config/credentials fallback; timeout/error fallback; no recovery-needed summary | Match explanation tries Gemini when configured. Recovery summary returns a fixed fallback immediately for an empty queue; with a donation needing recovery it calls Gemini and falls back if the call fails. | Fallback automated; live Gemini manual on Cloud Run |
 | Authorization | Donor/admin/recipient allowed routes; wrong role; recipient attempting another recipient's invitation/allocation | Protected operations reject unauthorized users; recipient scope stays bound to that recipient. | Automated API plus manual recipient-scope check |
 | Concurrency | Concurrent accepts against shared stock | PostgreSQL-only; total allocations and recipient capacity must never go negative or exceed available stock. | Automated PostgreSQL-only |
@@ -79,13 +80,14 @@ Component tests cover shell rendering, form presence, and demo warnings. Full br
 
 1. Start the API and frontend; from Admin, choose **Reset & reseed**.
 2. As Donor, publish 120 vegetarian portions with a deadline about two hours away. Verify offers go only to eligible recipients; D, I, J, and K must not receive one. Confirm pending offer portions sum to no more than 120. Repeat with `vegan` (multi-category matches), `meat` (K only), and `mixed` (no match).
-3. Open the match explanation. With Vertex AI configured it should report `gemini`; with AI unavailable it should report `fallback` while retaining deterministic scores/reasons.
-4. As a recipient with a pending offer, decline. Verify remaining stock is unchanged, that recipient is not re-invited, another eligible recipient is offered the stock, and Admin recovery/audit records the decline/rematch.
-5. Accept a partial offer (Kitchen A has 80 capacity). Verify the donation remains partially allocated, capacity/remaining portions decrease by the accepted amount, and other pending offers are rebalanced to no more than remaining stock.
-6. Accept a remaining offer. Verify allocations never exceed 120 and the donation becomes allocated when stock reaches zero; stale pending offers are cancelled.
-7. Confirm pickup, then complete pickup. Verify admin metrics distinguish allocated, pickup-confirmed, and pickup-completed portions.
-8. With no donations needing recovery, open **AI recovery summary**. Current behavior returns the fixed empty-queue fallback without calling Gemini. For the AI-backed path, create another donation, decline an offer (or exhaust pending offers), then open the summary; it should report `gemini` when the model request succeeds and `fallback` if it fails.
-9. Verify invalid donation requests (zero portions, past deadline, timezone-naive deadline), recipient isolation, donor/admin permissions, and recipient role restrictions.
+3. Leave a recipient offer unanswered for the configured response window (15 minutes by default). Verify the job marks it expired, records an audit event, and creates offers for other feasible recipients without changing remaining stock. Confirm the timed-out recipient is not re-invited.
+4. Open the match explanation. With Vertex AI configured it should report `gemini`; with AI unavailable it should report `fallback` while retaining deterministic scores/reasons.
+5. As a recipient with a pending offer, decline. Verify remaining stock is unchanged, that recipient is not re-invited, another eligible recipient is offered the stock, and Admin recovery/audit records the decline/rematch.
+6. Accept a partial offer (Kitchen A has 80 capacity). Verify capacity/remaining portions decrease by the accepted amount, and other pending offers are rebalanced to no more than remaining stock.
+7. Accept a remaining offer. Verify allocations never exceed 120 and the donation becomes allocated when stock reaches zero; stale pending offers are cancelled.
+8. Confirm pickup, then complete pickup. Verify admin metrics distinguish allocated, pickup-confirmed, and pickup-completed portions.
+9. With no donations needing recovery, open **AI recovery summary**. Current behavior returns the fixed empty-queue fallback without calling Gemini. For the AI-backed path, create another donation, decline an offer (or exhaust pending offers), then open the summary; it should report `gemini` when the model request succeeds and `fallback` if it fails.
+10. Verify invalid donation requests (zero portions, past deadline, timezone-naive deadline), recipient isolation, donor/admin permissions, and recipient role restrictions.
 
 ## Deployment smoke check
 

@@ -1,0 +1,18 @@
+# Build the API/timeout-worker image. Run this from Cloud Build against the
+# repository root; the image is then used by both the API service and Job.
+substitutions:
+  _REGION: asia-south1
+  _REPOSITORY: foodbridge
+  _IMAGE: foodbridge-rescueflow
+
+steps:
+  - name: gcr.io/cloud-builders/docker
+    dir: backend
+    args:
+      - build
+      - -t
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_IMAGE}:$COMMIT_SHA
+      - .
+
+images:
+  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_IMAGE}:$COMMIT_SHA

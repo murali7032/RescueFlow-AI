@@ -5,7 +5,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.auth import AuthUser, require_roles
-from app.db.models import Allocation, AuditEvent, Donation, Invitation
+from app.db.models import Allocation, AuditEvent, Donation, DonationReview, Invitation
 from app.db.session import get_db
 from app.services.recovery import recovery_summary, run_recovery
 
@@ -122,4 +122,26 @@ def audit_events(
             "created_at": e.created_at.isoformat() if e.created_at else None,
         }
         for e in rows
+    ]
+
+
+@router.get("/donor-reviews")
+def donor_reviews(
+    db: Session = Depends(get_db),
+    user: AuthUser = Depends(require_roles("admin")),
+    limit: int = Query(50, ge=1, le=200),
+):
+    rows = db.query(DonationReview).order_by(DonationReview.created_at.desc()).limit(limit).all()
+    return [
+        {
+            "id": review.id,
+            "donor_name": review.donor_name,
+            "donation_id": review.donation_id,
+            "food_name": review.donation.food_name if review.donation else None,
+            "recipient_name": review.recipient.name if review.recipient else None,
+            "rating": review.rating,
+            "feedback": review.feedback,
+            "created_at": review.created_at.isoformat() if review.created_at else None,
+        }
+        for review in rows
     ]

@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 class DonationCreate(BaseModel):
     donor_name: str = Field(min_length=1, max_length=120)
+    donor_type: str = Field(default="restaurant", pattern="^(restaurant|business|individual)$")
     category: str = Field(min_length=1, max_length=60)
     food_name: str = Field(default="Surplus meal", max_length=160)
     total_portions: int = Field(gt=0, le=100_000)
@@ -35,6 +36,11 @@ class DonationOut(BaseModel):
 
 class PickupUpdate(BaseModel):
     pickup_status: str = Field(pattern="^(pending|confirmed|completed|failed)$")
+
+
+class DonationReviewCreate(BaseModel):
+    rating: int = Field(ge=1, le=5)
+    feedback: str = Field(default="", max_length=2000)
 
 
 class ExplainMatchRequest(BaseModel):

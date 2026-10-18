@@ -7,7 +7,7 @@ live routing.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
 
@@ -125,10 +125,9 @@ def is_eligible(
 
     if prior_invitation and prior_invitation.status in (
         exclude_statuses
-        or {"accepted", "declined", "cancelled"}
+        or {"accepted", "declined", "cancelled", "expired"}
     ):
-        # Declined recipients are not re-invited unless retry policy allows.
-        # Default retry policy: no automatic re-invite after decline/accept/cancel.
+        # A recipient with a final response (including timeout) is not re-invited.
         return False, f"Prior invitation status is {prior_invitation.status}"
 
     return True, "eligible"
@@ -182,7 +181,7 @@ def create_invitations(db: Session, donation: Donation) -> list[Invitation]:
     Policy:
     - Suggested quantities across pending offers never exceed remaining stock.
     - Offers are suggestions, not reservations.
-    - Recipients who accepted/declined/cancelled are not re-invited (no retry).
+    - Recipients who accepted/declined/cancelled/expired are not re-invited.
     - Pending offers for recipients who receive no stock in this pass are cancelled.
     """
     now = datetime.now(timezone.utc)
@@ -238,6 +237,13 @@ def create_invitations(db: Session, donation: Donation) -> list[Invitation]:
                 score_breakdown=entry["breakdown"],
                 reasons=entry["reasons"],
                 status="pending",
+                expires_at=min(
+                    now
+                    + timedelta(
+                        minutes=get_settings().invitation_response_timeout_minutes
+                    ),
+                    as_utc(donation.pickup_deadline),
+                ),
             )
             db.add(invitation)
             created.append(invitation)
@@ -293,6 +299,7 @@ def explain_matches(donation: Donation, invitations: list[Invitation]) -> list[d
                 "suggested_portions": inv.suggested_portions,
                 "score": inv.score,
                 "status": inv.status,
+                "expires_at": inv.expires_at.isoformat() if inv.expires_at else None,
                 "breakdown": inv.score_breakdown or {},
                 "reasons": inv.reasons or [],
             }

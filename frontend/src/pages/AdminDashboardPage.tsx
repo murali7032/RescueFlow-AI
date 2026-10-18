@@ -41,30 +41,46 @@ interface AuditEvent {
   created_at?: string;
 }
 
+interface DonorReview {
+  id: number;
+  donor_name: string;
+  donation_id: number;
+  food_name: string | null;
+  recipient_name: string | null;
+  rating: number;
+  feedback: string;
+  created_at?: string;
+}
+
 export default function AdminDashboardPage() {
   const api = useApi("admin");
   const [dash, setDash] = useState<AdminDashboard | null>(null);
   const [recovery, setRecovery] = useState<RecoveryPayload | null>(null);
   const [audit, setAudit] = useState<AuditEvent[]>([]);
+  const [reviews, setReviews] = useState<DonorReview[]>([]);
   const [aiSummary, setAiSummary] = useState<string>("");
+  const [aiSource, setAiSource] = useState<string>("");
   const [message, setMessage] = useState<{
     tone: "success" | "error" | "info";
     text: string;
   } | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [busyAction, setBusyAction] = useState<string | null>(null);
 
   async function loadAll() {
     setLoading(true);
     try {
-      const [d, r, a] = await Promise.all([
+      const [d, r, a, reviews] = await Promise.all([
         api.get<AdminDashboard>("/api/v1/admin/dashboard"),
         api.get<RecoveryPayload>("/api/v1/admin/recovery"),
         api.get<AuditEvent[]>("/api/v1/admin/audit-events?limit=20"),
+        api.get<DonorReview[]>("/api/v1/admin/donor-reviews?limit=20"),
       ]);
       setDash(d);
       setRecovery(r);
       setAudit(a);
+      setReviews(reviews);
       setMessage(null);
     } catch (e) {
       setMessage({
@@ -82,6 +98,7 @@ export default function AdminDashboardPage() {
 
   async function seed(force = false) {
     setBusy(true);
+    setBusyAction(force ? "seed-reset" : "seed");
     setMessage(null);
     try {
       const result = await api.post<{ message: string; count: number; label?: string }>(
@@ -99,11 +116,13 @@ export default function AdminDashboardPage() {
       });
     } finally {
       setBusy(false);
+      setBusyAction(null);
     }
   }
 
   async function runRecovery(donationId: number) {
     setBusy(true);
+    setBusyAction(`recovery-${donationId}`);
     try {
       const result = await api.post<{ new_invitations: number }>(
         `/api/v1/admin/recovery/${donationId}`
@@ -120,16 +139,25 @@ export default function AdminDashboardPage() {
       });
     } finally {
       setBusy(false);
+      setBusyAction(null);
     }
   }
 
   async function loadAiSummary() {
     setBusy(true);
+    setBusyAction("ai-summary");
     try {
-      const result = await api.get<{ source: string; summary: string }>(
+      const result = await api.get<{ source: string; summary: string; context?: RecoveryPayload }>(
         "/api/v1/ai/recovery-summary"
       );
-      setAiSummary(`(${result.source}) ${result.summary}`);
+      const raw = result.summary.replace(/```[\s\S]*?```/g, "").replace(/[`*_#]/g, "").trim();
+      const invalid = /recent_recovery_events|total_remaining_portions_at_risk|donations_needing_recovery|\b\d+\s*[+*]\s*\d+\s*=/i.test(raw);
+      const context = result.context ?? recovery;
+      const safeSummary = context
+        ? `${context.count} donation${context.count === 1 ? "" : "s"} need attention, with ${context.total_remaining_portions_at_risk} portions still available for recovery.${context.donations_needing_recovery?.length ? ` Start with ${context.donations_needing_recovery.slice(0, 2).map((d) => `donation #${d.donation_id} from ${d.donor_name} (${d.remaining_portions} portions)`).join(" and ")}.` : " There are no open donations to rematch right now."}`
+        : "The recovery summary is ready.";
+      setAiSummary(invalid || raw.length < 20 ? safeSummary : raw);
+      setAiSource(invalid || raw.length < 20 ? "recovery data" : result.source);
     } catch (err) {
       setMessage({
         tone: "error",
@@ -137,6 +165,7 @@ export default function AdminDashboardPage() {
       });
     } finally {
       setBusy(false);
+      setBusyAction(null);
     }
   }
 
@@ -148,10 +177,10 @@ export default function AdminDashboardPage() {
         role="Administrator"
         actions={
           <>
-            <Button variant="secondary" disabled={busy} onClick={() => seed(false)}>
+            <Button variant="secondary" disabled={busy && busyAction !== "seed"} loading={busyAction === "seed"} onClick={() => seed(false)}>
               Seed demo
             </Button>
-            <Button variant="ghost" disabled={busy} onClick={() => seed(true)}>
+            <Button variant="ghost" disabled={busy && busyAction !== "seed-reset"} loading={busyAction === "seed-reset"} onClick={() => seed(true)}>
               Reset & reseed
             </Button>
           </>
@@ -203,14 +232,14 @@ export default function AdminDashboardPage() {
         <div className="grid-2">
           <Card title="Donations needing recovery">
             <div className="row-actions" style={{ marginBottom: "0.75rem" }}>
-              <Button variant="secondary" disabled={busy} onClick={loadAiSummary}>
+              <Button variant="secondary" disabled={busy && busyAction !== "ai-summary"} loading={busyAction === "ai-summary"} onClick={loadAiSummary}>
                 AI recovery summary
               </Button>
               <Button variant="ghost" disabled={busy} onClick={() => loadAll()}>
                 Refresh
               </Button>
             </div>
-            {aiSummary ? <Banner tone="info">{aiSummary}</Banner> : null}
+            {aiSummary ? <div className="ai-summary"><span className="badge">Summary · {aiSource}</span><Banner tone="info"><p>{aiSummary}</p></Banner></div> : null}
             {!recovery?.donations_needing_recovery?.length ? (
               <Empty>No donations currently flagged for recovery.</Empty>
             ) : (
@@ -231,7 +260,8 @@ export default function AdminDashboardPage() {
                     </div>
                     {d.needs_recovery ? (
                       <Button
-                        disabled={busy}
+                        disabled={busy && busyAction !== `recovery-${d.donation_id}`}
+                        loading={busyAction === `recovery-${d.donation_id}`}
                         onClick={() => runRecovery(d.donation_id)}
                       >
                         Rematch now
@@ -257,6 +287,23 @@ export default function AdminDashboardPage() {
                       </span>
                     </header>
                     <div className="muted">{e.created_at}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Card>
+
+          <Card title="Recent donor feedback">
+            {reviews.length === 0 ? <Empty>No donor reviews have been submitted yet.</Empty> : (
+              <div className="list">
+                {reviews.map((review) => (
+                  <div key={review.id} className="list-item">
+                    <header>
+                      <strong>{review.donor_name} · {"★".repeat(review.rating)}{"☆".repeat(5 - review.rating)}</strong>
+                      <span className="badge">Donation #{review.donation_id}</span>
+                    </header>
+                    <div className="muted">{review.food_name ?? "Donation"} · reviewed by {review.recipient_name ?? "recipient"}</div>
+                    {review.feedback ? <p>{review.feedback}</p> : <p className="muted">No written feedback.</p>}
                   </div>
                 ))}
               </div>

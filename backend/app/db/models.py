@@ -56,6 +56,7 @@ class Donation(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     donor_name: Mapped[str] = mapped_column(String(120))
+    donor_type: Mapped[str] = mapped_column(String(30), default="restaurant")
     organization_id: Mapped[int | None] = mapped_column(
         ForeignKey("organizations.id"), nullable=True
     )
@@ -111,6 +112,7 @@ class Invitation(Base):
     # pending | accepted | declined | cancelled | expired
     status: Mapped[str] = mapped_column(String(30), default="pending")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     responded_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
@@ -139,6 +141,28 @@ class Allocation(Base):
 
     donation = relationship("Donation", back_populates="allocations")
     recipient = relationship("Recipient", back_populates="allocations")
+
+
+class DonationReview(Base):
+    __tablename__ = "donation_reviews"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    donation_id: Mapped[int] = mapped_column(ForeignKey("donations.id"))
+    allocation_id: Mapped[int] = mapped_column(
+        ForeignKey("allocations.id"), unique=True
+    )
+    recipient_id: Mapped[int] = mapped_column(ForeignKey("recipients.id"))
+    donor_organization_id: Mapped[int | None] = mapped_column(
+        ForeignKey("organizations.id"), nullable=True, index=True
+    )
+    donor_name: Mapped[str] = mapped_column(String(120), index=True)
+    rating: Mapped[int] = mapped_column(Integer)
+    feedback: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+    donation = relationship("Donation")
+    allocation = relationship("Allocation")
+    recipient = relationship("Recipient")
 
 
 class AuditEvent(Base):

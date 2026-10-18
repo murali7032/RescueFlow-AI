@@ -70,7 +70,7 @@ EOF
 image="${REGION}-docker.pkg.dev/${PROJECT_ID}/${AR_REPO}/${SERVICE}:latest"
 
 echo "==> Cloud Build → ${image}"
-gcloud builds submit "${FRONTEND_DIR}" \
+gcloud builds submit "${ROOT_DIR}" \
   --project="${PROJECT_ID}" \
   --config="${ROOT_DIR}/deploy/cloudbuild-frontend.yaml" \
   --substitutions="_VITE_API_URL=${VITE_API_URL},_VITE_AUTH_MODE=${VITE_AUTH_MODE},_IMAGE=${image}"

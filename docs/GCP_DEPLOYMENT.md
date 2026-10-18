@@ -140,7 +140,27 @@ Runtime compute SA typically needs:
 
 ---
 
-## 7. Cost & cleanup
+## 7. Invitation timeout and rematch job
+
+The API assigns each invitation an expiry of `min(created_at + response timeout, donation pickup deadline)`. A Cloud Run Job scans due invitations and deadline-expired donations, expires them, and rematches remaining portions only when there is still time to collect. The default response timeout is 15 minutes and can be changed with `INVITATION_RESPONSE_TIMEOUT_MINUTES`.
+
+### Deploy safely from the Google Cloud Console
+
+Apply the schema migrations **before** deploying the new API image:
+
+1. Open **Cloud SQL → your PostgreSQL instance → Studio** and connect to the `foodbridge` database.
+2. Run `backend/app/db/migrations/20261018_invitation_expiry.sql`, then `backend/app/db/migrations/20261018_donor_reviews.sql` from this repository in Cloud SQL Studio. These add/backfill invitation expiry, donor type, and the review table. Existing pending invitations older than 15 minutes may be expired on the first job run. Donor trust score is the average recipient rating scaled to 100 (50 before the first review); at least three reviews averaging 2 stars or lower pause new submissions under that donor name.
+3. Build the new backend image so it contains both the API changes and `app.workers.invitation_timeout_worker`. In **Cloud Build → Triggers**, run the backend build trigger for the commit containing this change. Configure its build file as `deploy/cloudbuild-backend.yaml`; set `_REGION`, `_REPOSITORY`, and `_IMAGE` to the Artifact Registry region, repository, and image name you use. This build file builds and pushes the image; it does not deploy the service automatically.
+4. In **Cloud Run → Services → `foodbridge-rescueflow` → Edit and deploy new revision**, select the newly built Artifact Registry image. Keep the existing Cloud SQL connection, database secret, and service account. Set or confirm `INVITATION_RESPONSE_TIMEOUT_MINUTES=15`, `AI_ENABLED=true`, `GEMINI_MODEL=gemini-3.5-flash`, `GOOGLE_CLOUD_PROJECT`, `GOOGLE_CLOUD_LOCATION=asia-south1`, and `GOOGLE_GENAI_USE_VERTEXAI=true`. Deploy and confirm the new revision receives traffic.
+5. Rebuild and redeploy the UI because the recipient workspace now displays each offer's response deadline. In **Cloud Build → Triggers**, create or run a frontend build trigger from the repository root using `deploy/cloudbuild-frontend.yaml`; set `_VITE_API_URL` to the backend Cloud Run URL, `_VITE_AUTH_MODE` to `demo`, and `_IMAGE` to your Artifact Registry image path with a tag. Then in **Cloud Run → Services → `foodbridge-ui` → Edit and deploy new revision**, select that image and deploy. The frontend build config uses `frontend/` as its build directory.
+6. In **Cloud Run → Jobs → Create Job**, use the backend image from step 3. Set the container command to `python` and arguments to `-m app.workers.invitation_timeout_worker`. Configure the job with the same Cloud SQL instance, `DATABASE_URL` secret, and a service account that has `roles/cloudsql.client` and Secret Manager access. Set `ENVIRONMENT=production`, `AUTO_CREATE_TABLES=false`, and `INVITATION_RESPONSE_TIMEOUT_MINUTES=15`. Use one task and a short task timeout (for example, two minutes).
+7. Grant the Cloud Scheduler trigger service account permission to execute this job (`roles/run.invoker` on the job). The job's runtime service account is separate: it needs database and secret access, not scheduler permissions.
+8. Open the job's **Triggers** tab and choose **Add Scheduler Trigger**. Schedule it every minute (`* * * * *`) in UTC. Save the trigger, then run the job once manually to verify it connects and logs `Invitation timeout sweep complete`.
+9. In staging, create a donation, leave an offer unanswered for 15 minutes, then check the Cloud Run Job execution logs, invitation state, audit events, and rematched offers. Confirm remaining stock is unchanged until a recipient accepts and that the timed-out recipient is not re-invited.
+
+If your service already builds from a connected source repository, use its Cloud Build trigger to produce the updated image. Editing only Cloud Run environment variables does not put the new worker code into the image. Cloud Scheduler can trigger Cloud Run Jobs directly through the Console's job trigger workflow; see [Google's scheduled job guide](https://docs.cloud.google.com/run/docs/execute/jobs-on-schedule).
+
+## 8. Cost & cleanup
 
 ```bash
 gcloud run services delete foodbridge-rescueflow --region=asia-south1

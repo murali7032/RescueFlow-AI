@@ -12,6 +12,7 @@ import {
 import type { Allocation, Invitation } from "@foodbridge/shared/types";
 import { useApi } from "../hooks/useApi";
 import { useDemoRole } from "../context/DemoRoleContext";
+import { formatDateTime, formatMatchReason } from "@foodbridge/shared/format";
 
 interface RecipientOption {
   id: number;
@@ -30,6 +31,10 @@ export default function RecipientWorkspacePage() {
   } | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [busyAction, setBusyAction] = useState<string | null>(null);
+  const [reviewing, setReviewing] = useState<Allocation | null>(null);
+  const [reviewRating, setReviewRating] = useState(5);
+  const [reviewFeedback, setReviewFeedback] = useState("");
 
   const api = useApi("recipient", recipientId);
   const adminApi = useApi("admin");
@@ -80,6 +85,7 @@ export default function RecipientWorkspacePage() {
 
   async function accept(id: number) {
     setBusy(true);
+    setBusyAction(`accept-${id}`);
     setMessage(null);
     try {
       const result = await api.post<{ portions: number; pickup_status: string }>(
@@ -97,11 +103,13 @@ export default function RecipientWorkspacePage() {
       });
     } finally {
       setBusy(false);
+      setBusyAction(null);
     }
   }
 
   async function decline(id: number) {
     setBusy(true);
+    setBusyAction(`decline-${id}`);
     setMessage(null);
     try {
       const result = await api.post<{ status: string; new_invitations_created: number }>(
@@ -119,11 +127,13 @@ export default function RecipientWorkspacePage() {
       });
     } finally {
       setBusy(false);
+      setBusyAction(null);
     }
   }
 
   async function confirmPickup(allocationId: number) {
     setBusy(true);
+    setBusyAction(`pickup-${allocationId}`);
     try {
       await api.patch(`/api/v1/allocations/${allocationId}/pickup`, {
         pickup_status: "confirmed",
@@ -140,6 +150,28 @@ export default function RecipientWorkspacePage() {
       });
     } finally {
       setBusy(false);
+      setBusyAction(null);
+    }
+  }
+
+  async function submitReview() {
+    if (!reviewing) return;
+    setBusy(true);
+    setBusyAction(`review-${reviewing.id}`);
+    try {
+      const result = await api.post<{ donor_score: number; restricted: boolean }>(
+        `/api/v1/allocations/${reviewing.id}/review`,
+        { rating: reviewRating, feedback: reviewFeedback },
+      );
+      setMessage({ tone: "success", text: `Review saved. Donor trust score: ${result.donor_score}/100.${result.restricted ? " The donor has been paused for support review." : ""}` });
+      setReviewing(null);
+      setReviewFeedback("");
+      await refresh();
+    } catch (err) {
+      setMessage({ tone: "error", text: err instanceof ApiError ? err.message : "Could not save review" });
+    } finally {
+      setBusy(false);
+      setBusyAction(null);
     }
   }
 
@@ -179,7 +211,7 @@ export default function RecipientWorkspacePage() {
         <Card title="Capacity snapshot">
           <div className="stats">
             <Stat label="Kitchen" value={selected?.name ?? "—"} />
-            <Stat label="Available capacity" value={selected?.available_capacity ?? "—"} />
+            <Stat label="Available capacity" value={selected?.available_capacity ?? "—"} hint="Additional portions this kitchen can accept now" />
             <Stat label="Pending offers" value={pending.length} />
             <Stat
               label="Allocated portions"
@@ -216,8 +248,11 @@ export default function RecipientWorkspacePage() {
                         {inv.donation.category})
                       </div>
                       <div className="muted">
-                        Deadline {new Date(inv.donation.pickup_deadline).toLocaleString()} ·{" "}
+                        Pickup by {formatDateTime(inv.donation.pickup_deadline)} ·{" "}
                         {inv.donation.pickup_address}
+                      </div>
+                      <div className="muted">
+                        Respond by {formatDateTime(inv.expires_at)}
                       </div>
                       <div className="muted">
                         Donation remaining: {inv.donation.remaining_portions} portions
@@ -225,15 +260,16 @@ export default function RecipientWorkspacePage() {
                     </>
                   ) : null}
                   {inv.reasons?.length ? (
-                    <p className="muted">{inv.reasons.join(" · ")}</p>
+                    <p className="muted">{inv.reasons.map(formatMatchReason).join(" · ")}</p>
                   ) : null}
                   <div className="row-actions">
-                    <Button disabled={busy} onClick={() => accept(inv.id)}>
+                    <Button disabled={busy && busyAction !== `accept-${inv.id}`} loading={busyAction === `accept-${inv.id}`} onClick={() => accept(inv.id)}>
                       Accept
                     </Button>
                     <Button
                       variant="danger"
-                      disabled={busy}
+                      disabled={busy && busyAction !== `decline-${inv.id}`}
+                      loading={busyAction === `decline-${inv.id}`}
                       onClick={() => decline(inv.id)}
                     >
                       Decline
@@ -264,11 +300,19 @@ export default function RecipientWorkspacePage() {
                   {a.pickup_status === "pending" ? (
                     <Button
                       variant="secondary"
-                      disabled={busy}
+                      disabled={busy && busyAction !== `pickup-${a.id}`}
+                      loading={busyAction === `pickup-${a.id}`}
                       onClick={() => confirmPickup(a.id)}
                     >
                       Confirm pickup
                     </Button>
+                  ) : null}
+                  {a.pickup_status === "confirmed" || a.pickup_status === "completed" ? (
+                    a.reviewed ? <span className="badge">Review submitted</span> : (
+                      <Button variant="secondary" onClick={() => { setReviewing(a); setReviewRating(5); setReviewFeedback(""); }}>
+                        Review donor
+                      </Button>
+                    )
                   ) : null}
                 </div>
               ))}
@@ -276,6 +320,24 @@ export default function RecipientWorkspacePage() {
           ) : null}
         </Card>
       </div>
+      {reviewing ? (
+        <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setReviewing(null); }}>
+          <section className="review-modal" role="dialog" aria-modal="true" aria-labelledby="review-title">
+            <h2 id="review-title">Review {reviewing.donor_name ?? "the donor"}</h2>
+            <p className="muted">How was the food and pickup for {reviewing.food_name ?? "this donation"}?</p>
+            <div className="review-stars" role="radiogroup" aria-label="Rating">
+              {[1, 2, 3, 4, 5].map((star) => (
+                <button key={star} type="button" className={`review-star ${star <= reviewRating ? "selected" : ""}`} aria-label={`${star} star${star === 1 ? "" : "s"}`} aria-checked={reviewRating === star} role="radio" onClick={() => setReviewRating(star)}>★</button>
+              ))}
+            </div>
+            <label>Feedback (optional)<textarea maxLength={2000} value={reviewFeedback} onChange={(e) => setReviewFeedback(e.target.value)} placeholder="Share what went well or what could improve." /></label>
+            <div className="row-actions">
+              <Button variant="ghost" onClick={() => setReviewing(null)} disabled={busy}>Cancel</Button>
+              <Button onClick={submitReview} loading={busyAction === `review-${reviewing.id}`}>Submit review</Button>
+            </div>
+          </section>
+        </div>
+      ) : null}
     </div>
   );
 }

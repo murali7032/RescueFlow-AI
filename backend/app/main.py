@@ -21,6 +21,7 @@ from app.api import (
 )
 from app.config import get_settings
 from app.db.session import Base, engine
+from app.db.migrations.sqlite import upgrade_sqlite_schema
 from app.schemas import HealthOut
 
 settings = get_settings()
@@ -40,6 +41,7 @@ async def lifespan(_app: FastAPI):
 
     if settings.auto_create_tables:
         Base.metadata.create_all(bind=engine)
+        upgrade_sqlite_schema(engine)
         logger.info("Ensured database tables exist (AUTO_CREATE_TABLES=true)")
     else:
         logger.info("AUTO_CREATE_TABLES=false — expecting migrations already applied")

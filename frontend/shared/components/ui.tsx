@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 
 export function PageHeader({
   title,
@@ -70,20 +70,36 @@ export function Button({
   variant = "primary",
   disabled,
   type = "button",
+  loading = false,
+  className,
 }: {
   children: React.ReactNode;
-  onClick?: () => void;
+  onClick?: () => unknown;
   variant?: "primary" | "secondary" | "danger" | "ghost";
   disabled?: boolean;
   type?: "button" | "submit";
+  loading?: boolean;
+  className?: string;
 }) {
+  const [pending, setPending] = useState(false);
+  const isLoading = loading || pending;
+  function handleClick() {
+    if (!onClick || isLoading || disabled) return;
+    const result = onClick();
+    if (result && typeof (result as Promise<unknown>).then === "function") {
+      setPending(true);
+      void Promise.resolve(result).catch(() => undefined).finally(() => setPending(false));
+    }
+  }
   return (
     <button
       type={type}
-      className={`btn btn-${variant}`}
-      onClick={onClick}
-      disabled={disabled}
+      className={`btn btn-${variant} ${className ?? ""}`}
+      onClick={handleClick}
+      disabled={disabled || isLoading}
+      aria-busy={isLoading}
     >
+      {isLoading ? <span className="button-spinner" aria-hidden="true" /> : null}
       {children}
     </button>
   );

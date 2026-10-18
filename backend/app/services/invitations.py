@@ -39,6 +39,7 @@ def serialize_invitation(inv: Invitation, db: Session | None = None) -> dict:
         "reasons": inv.reasons,
         "status": inv.status,
         "created_at": inv.created_at.isoformat() if inv.created_at else None,
+        "expires_at": inv.expires_at.isoformat() if inv.expires_at else None,
         "responded_at": inv.responded_at.isoformat() if inv.responded_at else None,
         "donation": donation_summary,
     }

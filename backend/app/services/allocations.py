@@ -14,7 +14,8 @@ from sqlalchemy.orm import Session
 
 from app.db.models import Allocation, Donation, Invitation, Recipient
 from app.services.audit import record_event
-from app.services.matching import create_invitations
+from app.services.matching import as_utc, create_invitations
+from app.services.timeouts import process_donation_timeouts
 
 
 def _sync_donation_status(donation: Donation) -> None:
@@ -36,6 +37,22 @@ def accept_invitation(
 ) -> Allocation:
     """Accept invitation and reserve portions under row locks when supported."""
     try:
+        # Lock donation before invitation to use the same order as the timeout
+        # worker and avoid deadlocks while the worker expires pending offers.
+        invitation_ref = (
+            db.query(Invitation.donation_id)
+            .filter(Invitation.id == invitation_id)
+            .first()
+        )
+        if invitation_ref is None:
+            raise HTTPException(status_code=404, detail="Invitation not found")
+
+        donation = (
+            db.query(Donation)
+            .filter(Donation.id == invitation_ref[0])
+            .with_for_update()
+            .first()
+        )
         invitation = (
             db.query(Invitation)
             .filter(Invitation.id == invitation_id)
@@ -51,12 +68,6 @@ def accept_invitation(
                 detail=f"Invitation is already {invitation.status}",
             )
 
-        donation = (
-            db.query(Donation)
-            .filter(Donation.id == invitation.donation_id)
-            .with_for_update()
-            .first()
-        )
         recipient = (
             db.query(Recipient)
             .filter(Recipient.id == invitation.recipient_id)
@@ -75,14 +86,18 @@ def accept_invitation(
             )
 
         now = datetime.now(timezone.utc)
-        deadline = donation.pickup_deadline
-        if deadline.tzinfo is None:
-            deadline = deadline.replace(tzinfo=timezone.utc)
-        if deadline <= now:
-            invitation.status = "expired"
-            donation.status = "expired"
+        if (
+            as_utc(invitation.expires_at) <= now
+            or as_utc(donation.pickup_deadline) <= now
+        ):
+            process_donation_timeouts(db, donation, now=now)
             db.commit()
-            raise HTTPException(status_code=409, detail="Donation deadline has passed")
+            detail = (
+                "Donation deadline has passed"
+                if as_utc(donation.pickup_deadline) <= now
+                else "Invitation has expired"
+            )
+            raise HTTPException(status_code=409, detail=detail)
 
         if donation.remaining_portions <= 0:
             raise HTTPException(status_code=409, detail="No portions remain")
@@ -185,6 +200,20 @@ def decline_invitation(
 ) -> tuple[Invitation, list[Invitation]]:
     """Decline without reducing stock or capacity; optionally rematch."""
     try:
+        invitation_ref = (
+            db.query(Invitation.donation_id)
+            .filter(Invitation.id == invitation_id)
+            .first()
+        )
+        if invitation_ref is None:
+            raise HTTPException(status_code=404, detail="Invitation not found")
+
+        donation = (
+            db.query(Donation)
+            .filter(Donation.id == invitation_ref[0])
+            .with_for_update()
+            .first()
+        )
         invitation = (
             db.query(Invitation)
             .filter(Invitation.id == invitation_id)
@@ -193,6 +222,8 @@ def decline_invitation(
         )
         if invitation is None:
             raise HTTPException(status_code=404, detail="Invitation not found")
+        if donation is None:
+            raise HTTPException(status_code=404, detail="Donation not found")
 
         if invitation.status != "pending":
             raise HTTPException(
@@ -217,7 +248,6 @@ def decline_invitation(
         )
 
         new_invitations: list[Invitation] = []
-        donation = db.get(Donation, invitation.donation_id)
         if rematch and donation is not None:
             new_invitations = create_invitations(db, donation)
             record_event(

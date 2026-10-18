@@ -19,6 +19,9 @@ export type PickupStatus = "pending" | "confirmed" | "completed" | "failed";
 export interface Donation {
   id: number;
   donor_name: string;
+  donor_type?: "restaurant" | "business" | "individual";
+  donor_score?: number;
+  donor_review_count?: number;
   category: string;
   food_name: string;
   total_portions: number;
@@ -34,9 +37,11 @@ export interface Donation {
 export interface MatchOffer {
   invitation_id: number;
   recipient_id: number;
+  recipient_name?: string;
   suggested_portions: number;
   score: number;
   status: InvitationStatus;
+  expires_at?: string;
   breakdown?: Record<string, unknown>;
   reasons?: string[];
 }
@@ -49,6 +54,7 @@ export interface Invitation {
   suggested_portions: number;
   score: number;
   status: InvitationStatus;
+  expires_at: string;
   reasons?: string[];
   donation?: {
     id: number;
@@ -69,6 +75,9 @@ export interface Allocation {
   recipient_name?: string;
   portions: number;
   pickup_status: PickupStatus;
+  donor_name?: string;
+  food_name?: string;
+  reviewed?: boolean;
 }
 
 export interface AdminDashboard {

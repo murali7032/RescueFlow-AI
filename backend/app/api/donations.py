@@ -3,10 +3,11 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.auth import AuthUser, get_current_user, require_roles
-from app.db.models import Donation, Invitation
+from app.db.models import Donation, DonationReview, Invitation
 from app.db.session import get_db
 from app.schemas import DonationCreate, DonationOut
 from app.services.audit import record_event
@@ -15,10 +16,25 @@ from app.services.matching import create_invitations, explain_matches
 router = APIRouter(prefix="/donations", tags=["donations"])
 
 
-def _serialize(d: Donation) -> dict:
+def _serialize(d: Donation, db: Session) -> dict:
+    review_query = db.query(
+        func.count(DonationReview.id), func.avg(DonationReview.rating)
+    )
+    if d.organization_id is not None:
+        review_query = review_query.filter(
+            DonationReview.donor_organization_id == d.organization_id
+        )
+    else:
+        review_query = review_query.filter(
+            func.lower(DonationReview.donor_name) == d.donor_name.lower()
+        )
+    count, average = review_query.one()
     return {
         "id": d.id,
         "donor_name": d.donor_name,
+        "donor_type": d.donor_type,
+        "donor_score": round(float(average) * 20) if count and average is not None else 50,
+        "donor_review_count": int(count),
         "category": d.category,
         "food_name": d.food_name,
         "total_portions": d.total_portions,
@@ -48,8 +64,27 @@ def create_donation(
     if payload.total_portions <= 0:
         raise HTTPException(422, "total_portions must be greater than zero")
 
+    review_query = db.query(
+        func.count(DonationReview.id), func.avg(DonationReview.rating)
+    )
+    if user.organization_id is not None:
+        review_query = review_query.filter(
+            DonationReview.donor_organization_id == user.organization_id
+        )
+    else:
+        review_query = review_query.filter(
+            func.lower(DonationReview.donor_name) == payload.donor_name.strip().lower()
+        )
+    review_count, average_rating = review_query.one()
+    if review_count >= 3 and average_rating is not None and average_rating <= 2:
+        raise HTTPException(
+            403,
+            "This donor is temporarily paused after repeated low ratings. Contact support to review the restriction.",
+        )
+
     donation = Donation(
-        donor_name=payload.donor_name,
+        donor_name=payload.donor_name.strip(),
+        donor_type=payload.donor_type,
         category=payload.category.lower().strip(),
         food_name=payload.food_name,
         total_portions=payload.total_portions,
@@ -81,7 +116,7 @@ def create_donation(
     db.refresh(donation)
 
     return {
-        **_serialize(donation),
+        **_serialize(donation, db),
         "invitations_created": len(invitations),
     }
 
@@ -96,7 +131,7 @@ def list_donations(
     if user.role == "donor" and user.organization_id:
         q = q.filter(Donation.organization_id == user.organization_id)
     rows = q.limit(limit).all()
-    return [_serialize(d) for d in rows]
+    return [_serialize(d, db) for d in rows]
 
 
 @router.get("/{donation_id}")
@@ -115,7 +150,7 @@ def get_donation(
         and donation.organization_id != user.organization_id
     ):
         raise HTTPException(403, "Not authorized for this donation")
-    return _serialize(donation)
+    return _serialize(donation, db)
 
 
 @router.get("/{donation_id}/matches")
@@ -133,7 +168,10 @@ def get_matches(
         .order_by(Invitation.score.desc(), Invitation.id.asc())
         .all()
     )
-    return explain_matches(donation, invitations)
+    return [
+        {**match, "recipient_name": invitation.recipient.name if invitation.recipient else None}
+        for match, invitation in zip(explain_matches(donation, invitations), invitations)
+    ]
 
 
 # Diagram: OPEN → CANCELLED (donor cancels)
@@ -185,6 +223,6 @@ def cancel_donation(
     db.commit()
     db.refresh(donation)
     return {
-        **_serialize(donation),
+        **_serialize(donation, db),
         "cancelled_invitations": cancelled_count,
     }
